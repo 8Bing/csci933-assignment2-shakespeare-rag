@@ -1,0 +1,85 @@
+# ============================================================
+# CSCI433/933 Assignment 2 — .gitignore
+# ============================================================
+
+# -------- Python --------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+
+# -------- Virtual environments --------
+.venv/
+venv/
+env/
+ENV/
+
+# -------- IDE / Editor --------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# -------- macOS / Windows / Linux junk --------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -------- Jupyter / notebooks --------
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# -------- Embedding cache & model artefacts --------
+# Large and reproducible — every user regenerates locally.
+*.npy
+*.npz
+*.pkl
+*.bin
+*.faiss
+embeddings/
+models/
+.cache/
+
+# -------- Logs / runtime --------
+*.log
+logs/
+
+# -------- Dataset files --------
+# Dataset is provided separately to all group members.
+# Keep the folder structure but ignore the contents.
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# -------- Evaluation runtime outputs --------
+# Keep question file and final scored CSV; ignore intermediate runs.
+results/runs/
+results/*.tmp.csv
+results/*.npy
+results/*.pkl
+results/*.jsonl
+
+# -------- LaTeX build outputs (we use Overleaf, but in case anyone builds locally) --------
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+
+# -------- Environment / secrets --------
+.env
+.env.local
+secrets.json
+*.key
