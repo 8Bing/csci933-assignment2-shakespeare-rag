@@ -51,9 +51,13 @@ Student Names and Student Numbers: \emph{Insert details}
 We present a Shakespeare-aware question-answering system built around a
 small, deployable retrieval-augmented generation (RAG) pipeline. Three
 plays (\emph{Hamlet}, \emph{Macbeth}, and \emph{Romeo and Juliet}) are
-indexed at the scene level using a TF--IDF vector space; an extractive
-composer produces beginner-friendly answers conditioned on the retrieved
-scenes and a stylised composer produces short Shakespearean-style verse.
+indexed at the scene level using
+\texttt{sentence-transformers/all-MiniLM-L6-v2} embeddings;
+\texttt{phi3:3.8b} (3.8B parameters) is called locally via Ollama to
+compose beginner-friendly answers conditioned on the retrieved scenes.
+A deterministic extractive composer is retained as a fallback when
+Ollama is not running, and a stylised composer produces short
+Shakespearean-style verse.
 The system runs end-to-end on a standard laptop without GPU acceleration
 or external API access. Across twelve evaluation questions (five
 instructor-provided, seven group-designed), the RAG system outperformed
