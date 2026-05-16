@@ -73,15 +73,15 @@ python rag_chatbot.py
 
 ## Headline results
 
-Across twelve evaluation questions (1–5 rubric, higher is better):
+Across twelve evaluation questions (1–5 rubric, higher is better) with phi3:3.8b as the generator and MiniLM as the embedder:
 
 | Criterion           | Baseline | RAG  | Δ     |
 |---------------------|----------|------|-------|
-| Correctness         | 2.60     | 3.00 | +0.40 |
-| Grounding           | 2.33     | 4.67 | +2.33 |
+| Correctness         | 2.60     | 4.20 | +1.60 |
+| Grounding           | 2.33     | 3.00 | +0.67 |
 | Retrieval relevance | 1.00     | 4.83 | +3.83 |
-| Usefulness          | 3.00     | 4.33 | +1.33 |
-| Style quality       | 3.00     | 5.00 | +2.00 |
+| Usefulness          | 3.00     | 3.17 | +0.17 |
+| Style quality       | 3.00     | 3.00 | 0.00  |
 
 Full discussion and failure analysis are in
 `report/assignment2_report.pdf`.
