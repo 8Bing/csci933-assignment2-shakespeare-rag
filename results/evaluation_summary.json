@@ -1,0 +1,31 @@
+{
+  "baseline": {
+    "n": 12,
+    "mean_correctness_score": 2.6,
+    "n_correctness_score": 10,
+    "mean_grounding_score": 2.333,
+    "n_grounding_score": 12,
+    "mean_retrieval_relevance_score": 1,
+    "n_retrieval_relevance_score": 12,
+    "mean_usefulness_score": 3,
+    "n_usefulness_score": 12,
+    "mean_style_quality_score": 3,
+    "n_style_quality_score": 2
+  },
+  "rag": {
+    "n": 12,
+    "mean_correctness_score": 4.2,
+    "n_correctness_score": 10,
+    "mean_grounding_score": 3,
+    "n_grounding_score": 12,
+    "mean_retrieval_relevance_score": 4.833,
+    "n_retrieval_relevance_score": 12,
+    "mean_usefulness_score": 3.167,
+    "n_usefulness_score": 12,
+    "mean_style_quality_score": 3,
+    "n_style_quality_score": 2
+  },
+  "retrieval_backend": "sentence-transformers (sentence-transformers/all-MiniLM-L6-v2)",
+  "n_chunks_indexed": 73,
+  "n_questions": 12
+}

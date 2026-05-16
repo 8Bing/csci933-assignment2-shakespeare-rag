@@ -1,106 +1,170 @@
 """
-Minimal RAG chatbot scaffold.
+Retrieval-Augmented Shakespeare chatbot.
 
-This file deliberately leaves the language-model call as a placeholder.
-Students must connect it to their chosen local model or approved hosted API.
+The system wires the dataset, chunker, embedding retriever, and the
+extractive / stylised composers into a single object. The class is
+deliberately small so that ``evaluate.py`` can instantiate the system
+once and reuse it for every evaluation question.
 
-The starter implementation prints the RAG prompt so that the retrieval and
-prompt construction pipeline can be tested before generation is added.
+Run as a CLI::
+
+    cd src
+    python rag_chatbot.py
+
+The script will load the data, build the index, and present an
+interactive prompt. Each generated answer is displayed alongside the
+retrieved passages, satisfying the assignment's grounded retrieval
+requirement.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 from config import DEFAULT_TOP_K, EMBEDDING_MODEL_NAME, PROMPT_DIR
 from data_loader import load_all_plays
 from chunking import create_chunks, format_chunk_for_display
 from retrieval import EmbeddingRetriever
+from generation import (
+    ExtractiveComposer,
+    StylisedComposer,
+    classify_question,
+)
 
 
 Chunk = Dict[str, Any]
+RetrievedItem = Tuple[Chunk, float]
 
 
 def load_system_prompt() -> str:
+    """Read the system prompt that drives the (optional) hosted LLM mode."""
     prompt_path = PROMPT_DIR / "system_prompt.txt"
-    return prompt_path.read_text(encoding="utf-8")
+    return prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else ""
 
 
-def build_rag_prompt(query: str, retrieved: List[Tuple[Chunk, float]]) -> str:
-    """
-    Build a prompt for a RAG-based answer.
-    """
+def build_rag_prompt(query: str, retrieved: List[RetrievedItem]) -> str:
+    """Build a textual prompt for an LLM (used by the optional HF mode)."""
     system_prompt = load_system_prompt()
-
     context_blocks = []
     for rank, (chunk, score) in enumerate(retrieved, start=1):
         context_blocks.append(
             f"[Context {rank} | similarity={score:.4f}]\n"
             f"{format_chunk_for_display(chunk)}"
         )
-
     context = "\n\n".join(context_blocks)
-
-    prompt = f"""{system_prompt}
-
-Retrieved context:
-{context}
-
-User question:
-{query}
-
-Answer:
-"""
-    return prompt
-
-
-def generate_answer(prompt: str) -> str:
-    """
-    Placeholder language-model interface.
-
-    Students must replace this with one of:
-    - a local HuggingFace model;
-    - an approved hosted API;
-    - another justified SLM interface.
-
-    The returned answer must be conditioned on the retrieved context.
-    """
-    # TODO: Replace this placeholder with a real model call.
     return (
-        "[PLACEHOLDER ANSWER]\n"
-        "Connect this function to your selected language model or API. "
-        "Your final answer should use the retrieved context and should not invent unsupported details."
+        f"{system_prompt}\n\n"
+        f"Retrieved context:\n{context}\n\n"
+        f"User question:\n{query}\n\n"
+        f"Answer:\n"
     )
 
 
-def main() -> None:
-    records = load_all_plays()
-    chunks = create_chunks(records)
+@dataclass
+class RagChatbot:
+    """End-to-end RAG chatbot built on extractive composition."""
 
-    retriever = EmbeddingRetriever(EMBEDDING_MODEL_NAME)
-    retriever.build_index(chunks)
+    top_k: int = DEFAULT_TOP_K
+    embedding_model_name: str = EMBEDDING_MODEL_NAME
+    chunk_strategy: str = "scene"
+    retriever: Optional[EmbeddingRetriever] = None
+    extractive: ExtractiveComposer = field(default_factory=ExtractiveComposer)
+    stylised: StylisedComposer = field(default_factory=StylisedComposer)
 
-    print("Shakespeare-aware RAG chatbot scaffold.")
-    print("Type 'quit' to exit.\n")
+    # Filled in by build()
+    chunks: List[Chunk] = field(default_factory=list)
+    backend_name: str = ""
 
-    while True:
-        query = input("Question: ").strip()
-        if query.lower() in {"quit", "exit"}:
-            break
+    def build(self) -> "RagChatbot":
+        records = load_all_plays()
+        self.chunks = create_chunks(records, self.chunk_strategy)
+        self.retriever = EmbeddingRetriever(self.embedding_model_name)
+        self.retriever.build_index(self.chunks)
+        self.backend_name = self.retriever.backend_name
+        return self
 
-        retrieved = retriever.retrieve(query, top_k=DEFAULT_TOP_K)
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def retrieve(self, query: str, top_k: Optional[int] = None) -> List[RetrievedItem]:
+        assert self.retriever is not None, "RagChatbot.build() must be called first"
+        return self.retriever.retrieve(query, top_k or self.top_k)
+
+    def answer(self, query: str, top_k: Optional[int] = None) -> Dict[str, Any]:
+        """Return both the generated answer and the retrieved evidence."""
+        retrieved = self.retrieve(query, top_k)
+        qtype = classify_question(query)
         prompt = build_rag_prompt(query, retrieved)
-        answer = generate_answer(prompt)
 
-        print("\nRetrieved evidence:")
-        for rank, (chunk, score) in enumerate(retrieved, start=1):
-            print("-" * 80)
-            print(f"Rank {rank} | Score: {score:.4f}")
-            print(format_chunk_for_display(chunk))
+        # Try Ollama first (phi3:3.8b); fall back to deterministic composers.
+        ollama_response = None
+        try:
+            from ollama_client import OllamaGenerator
+            gen = OllamaGenerator()
+            if gen.available():
+                ollama_response = gen.generate(prompt)
+        except Exception as exc:  # pragma: no cover
+            print(f"[warn] Ollama call failed, using extractive fallback: {exc}")
+            ollama_response = None
 
-        print("\nGenerated answer:")
-        print(answer)
-        print("\n")
+        if ollama_response:
+            if qtype == "stylised_generation":
+                response = (
+                    "[STYLISED CREATIVE OUTPUT -- not textual evidence; "
+                    "generated by phi3:3.8b grounded on the retrieved scenes.]\n"
+                    + ollama_response
+                )
+            else:
+                response = ollama_response
+        elif qtype == "stylised_generation":
+            response = self.stylised.generate(query, retrieved)
+        else:
+            response = self.extractive.generate(
+                query, retrieved, question_type=qtype
+            )
+
+        return {
+            "query": query,
+            "question_type": qtype,
+            "retrieved": retrieved,
+            "response": response,
+            "prompt": prompt,
+        }
+
+
+# ---------------------------------------------------------------------------
+# CLI entry-point
+# ---------------------------------------------------------------------------
+
+
+def _print_answer(result: Dict[str, Any]) -> None:
+    print("\nRetrieved evidence:")
+    for rank, (chunk, score) in enumerate(result["retrieved"], start=1):
+        print("-" * 78)
+        print(f"Rank {rank} | Similarity: {score:.4f}")
+        print(format_chunk_for_display(chunk))
+    print("\nGenerated answer:")
+    print(result["response"])
+    print()
+
+
+def main() -> None:
+    bot = RagChatbot().build()
+    print("Shakespeare-aware RAG chatbot")
+    print(f"Retrieval backend: {bot.backend_name}")
+    print(f"Indexed chunks: {len(bot.chunks)}")
+    print("Type 'quit' to exit.\n")
+    while True:
+        try:
+            query = input("Question: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not query or query.lower() in {"quit", "exit"}:
+            break
+        result = bot.answer(query)
+        _print_answer(result)
 
 
 if __name__ == "__main__":

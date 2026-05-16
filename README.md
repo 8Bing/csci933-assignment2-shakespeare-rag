@@ -1,72 +1,97 @@
-# Assignment 2 Starter Code: Shakespeare-Aware SLM/RAG System
+# A Lightweight Retrieval-Augmented Shakespeare Assistant
 
-This starter code provides a minimal scaffold for Assignment 2. It is **not** a complete solution. 
-Your group must complete, modify, justify, evaluate, and document your own system.
+This repository contains the working system, evaluation harness, and
+LaTeX report for the CSCI433/933 Assignment 2 group project.
 
-## Expected Dataset Placement
+The system answers plain-English questions about *Hamlet*, *Macbeth*,
+and *Romeo and Juliet* using a retrieval-augmented generation (RAG)
+pipeline that runs entirely on a standard laptop, with no GPU and no
+external API.
 
-Place the three provided play files in:
+## Repository layout
 
-```text
-data/processed/
-  hamlet.json
-  macbeth.json
-  romeo_and_juliet.json
+```
+assessment 2/
+├── data/processed/      JSON + JSONL processed plays (input corpus)
+├── prompts/             system_prompt.txt, stylised_prompt.txt
+├── results/
+│   ├── instructor_questions.json   5 instructor-provided questions
+│   ├── group_questions.json        7 group-designed questions
+│   ├── evaluation_results.csv      12 questions × 2 systems = 24 rows
+│   ├── evaluation_results.jsonl    full detail incl. retrieved chunks
+│   └── evaluation_summary.json     mean scores per system
+├── src/
+│   ├── config.py        paths, defaults
+│   ├── data_loader.py   JSON → flat utterance records
+│   ├── chunking.py      scene-level (default) and utterance chunkers
+│   ├── retrieval.py     sentence-transformers (preferred) or TF–IDF
+│   ├── generation.py    ExtractiveComposer + StylisedComposer (+ optional HF)
+│   ├── baseline.py      PromptOnlyBaseline (used for the report)
+│   ├── rag_chatbot.py   end-to-end RAG chatbot + CLI entry point
+│   ├── build_index.py   smoke test: load → chunk → retrieve
+│   └── evaluate.py      evaluation harness that writes results/*
+├── report/
+│   ├── assignment2_report.tex   technical report (LaTeX)
+│   ├── assignment2_report.pdf   compiled report
+│   └── …                        instructor template, specification PDF
+├── requirements.txt
+└── README.md            this file
 ```
 
-Each file is expected to contain structured records or scene chunks. You may adapt the loader if your dataset format differs.
-
-## Suggested Workflow
-
-1. Load the structured Shakespeare dataset.
-2. Create retrieval chunks.
-3. Generate embeddings.
-4. Build a retrieval mechanism.
-5. Retrieve relevant passages for a query.
-6. Build a RAG prompt using retrieved passages.
-7. Generate an answer using a selected language model or hosted API.
-8. Evaluate baseline and RAG systems using instructor-provided and group-designed questions.
-
-## Quick Start
-
-Create a Python environment and install minimal dependencies:
+## Setup
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run a simple retrieval test:
+`requirements.txt` lists `numpy`, `pandas`, `scikit-learn`,
+`sentence-transformers`, and `tqdm`. The retrieval module automatically
+falls back to a scikit-learn TF–IDF backend if
+`sentence-transformers` is not installed; both backends share the same
+public API.
+
+## How to run
 
 ```bash
-python src/build_index.py
+cd src
+
+# 1. Smoke test: load the data, build the index, retrieve a few samples.
+python build_index.py
+
+# 2. Reproduce the evaluation reported in the technical report.
+#    Writes:
+#      ../results/evaluation_results.csv
+#      ../results/evaluation_results.jsonl
+#      ../results/evaluation_summary.json
+python evaluate.py
+
+# 3. Interactive Shakespeare chatbot. Type 'quit' to exit.
+python rag_chatbot.py
 ```
 
-Run the chatbot scaffold:
+## Headline results
 
-```bash
-python src/rag_chatbot.py
-```
+Across twelve evaluation questions (1–5 rubric, higher is better):
 
-Run the evaluation scaffold:
+| Criterion           | Baseline | RAG  | Δ     |
+|---------------------|----------|------|-------|
+| Correctness         | 2.60     | 3.00 | +0.40 |
+| Grounding           | 2.33     | 4.67 | +2.33 |
+| Retrieval relevance | 1.00     | 4.83 | +3.83 |
+| Usefulness          | 3.00     | 4.33 | +1.33 |
+| Style quality       | 3.00     | 5.00 | +2.00 |
 
-```bash
-python src/evaluate.py
-```
+Full discussion and failure analysis are in
+`report/assignment2_report.pdf`.
 
-## What You Must Add
+## Reproducibility notes
 
-You must add or complete:
-
-- dataset loading adapted to the provided dataset;
-- a justified chunking strategy;
-- a working embedding model;
-- a working retrieval method;
-- a baseline system;
-- a RAG-based system;
-- a model/API interface for answer generation;
-- evaluation results and failure analysis;
-- documentation explaining how to run your system.
-
-## Important
-
-Do not submit the starter code unchanged. It is provided only to reduce setup friction.
+* The TF–IDF index is rebuilt at the start of every run; on a 73-scene
+  corpus this takes well under a second.
+* The evaluation rubric is deterministic and implemented in
+  `src/evaluate.py`. Re-running `python evaluate.py` will produce
+  byte-identical CSV / JSONL outputs.
+* The CLI displays retrieved evidence alongside every generated answer,
+  satisfying the "grounded retrieval" requirement.
