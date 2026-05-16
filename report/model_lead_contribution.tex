@@ -1,0 +1,228 @@
+\documentclass[10pt,twocolumn,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{times}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{verbatim}
+\usepackage{amsmath}
+\usepackage[a4paper,margin=2cm]{geometry}
+\setlength{\columnsep}{0.6cm}
+\setlist[itemize]{leftmargin=*, itemsep=2pt, topsep=2pt}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\pagestyle{empty}
+
+\begin{document}
+
+% ============================================================
+\section{Methodology}
+\label{sec:methodology}
+
+\textbf{Relevant marks: Model adaptation and RAG methodology (20 marks).}
+
+\subsection{Baseline System}
+
+The baseline, \verb|PromptOnlyBaseline| (\verb|src/baseline.py|),
+returns a fixed, generic answer drawn from a small lookup of
+play-level priors (e.g., a one-sentence summary of \emph{Macbeth}).
+It does \emph{not} call the retriever and therefore cannot cite a
+scene, act, or speaker. The baseline is intentionally weak: its
+purpose is to expose the contribution of retrieval rather than to
+compete on absolute quality. A second variant,
+\verb|KeywordRetrievalBaseline|, uses Jaccard overlap over scene
+summaries; it is included in the repository for completeness but is
+not the primary baseline reported here. We chose the prompt-only
+variant as the primary baseline because the assignment specification
+explicitly lists ``prompt-only generation'' as an acceptable baseline.
+
+\subsection{RAG-Based System}
+
+The RAG system (\verb|src/rag_chatbot.py|) has five components.
+
+\textbf{Embedder / retriever.} Implemented in
+\verb|src/retrieval.py|. The class \verb|EmbeddingRetriever| has a
+single public API (\verb|build_index|, \verb|retrieve|) and two
+interchangeable backends:
+\textit{(a)} \verb|sentence-transformers/all-MiniLM-L6-v2| dense
+embeddings (22M parameters, 384-d, CPU-friendly), used when the
+package is installed;
+\textit{(b)} a scikit-learn TF--IDF backend used as a fallback. The
+active backend is exposed via \verb|retriever.backend_name| and
+recorded in \verb|results/evaluation_summary.json|. \textbf{All
+evaluation numbers reported here were produced with the MiniLM
+backend.}
+
+\textbf{Top-$k$.} We use $k = 3$. With $73$ scene chunks, this returns
+roughly one scene per play on average; a beginner-friendly answer
+typically needs only the highest-scoring scene as evidence.
+
+\textbf{Prompt structure.} \verb|src/rag_chatbot.py| builds a prompt
+that injects the retrieved evidence between a system prompt
+(\verb|prompts/system_prompt.txt|, instructing the model to use only
+retrieved context, indicate uncertainty, and avoid invented details)
+and the user query. The final prompt is the concatenation of the
+system prompt, the top-$k$ retrieved chunks (each annotated with
+``\texttt{[Context $i$ $|$ similarity=$s$]}'' headers), and the user
+query under an ``\texttt{Answer:}'' label.
+
+\textbf{Generator: phi3:3.8b via Ollama (default).} The default
+generator is Microsoft's \texttt{phi3:3.8b} (3.8B parameters,
+instruction-tuned, 4-bit quantised) called over the local Ollama HTTP
+API at \verb|http://localhost:11434|. The model receives the system
+prompt, the top-$k$ retrieved scenes, and the user question (see
+``Prompt structure'' above) and returns a beginner-friendly answer
+constrained by the prompt. We picked phi3:3.8b because it is one of
+the smallest competent instruction-tuned models that runs on a
+standard laptop without a GPU, satisfies the assignment's
+``small, deployable, resource-constrained'' framing, and is fully
+local (no data leaves the host).
+
+\textbf{Fallback generator: extractive composer.} If Ollama is not
+running, the system silently falls back to a deterministic extractive
+composer (\verb|generation.ExtractiveComposer|) that constructs each
+answer from the retrieved scene summaries, keywords, and one verbatim
+quote. The fallback guarantees the system still works on machines
+without Ollama installed.
+
+\textbf{Stylised composer.} \verb|generation.StylisedComposer|
+produces a $\leq$150-word Shakespearean-style verse, prefixed with
+``\texttt{[STYLISED CREATIVE OUTPUT -- not textual evidence; based on
+the retrieved scenes.]}'' as required by the specification.
+
+\subsection{Model Choice and Justification}
+
+We deliberately avoided an external hosted API and a large local
+generative model. The assignment's pedagogical focus is on
+``\emph{purpose-built systems that can operate under constraints involving
+cost, privacy, latency, maintainability, and domain specificity}''.
+phi3:3.8b satisfies all five constraints:
+
+\begin{itemize}
+    \item \textbf{Cost:} zero inference cost; runs entirely on the
+        student laptop after a one-time $\sim$2\,GB model download.
+    \item \textbf{Privacy:} fully local; no data leaves the host.
+    \item \textbf{Latency:} 20--60 seconds per CPU answer; fast
+        enough for an interactive demo.
+    \item \textbf{Maintainability:} one HTTP endpoint, one model
+        file, no Docker, no GPU drivers.
+    \item \textbf{Domain specificity:} retrieval-first prompting
+        binds the model's output to the Shakespeare corpus rather
+        than its general prior.
+\end{itemize}
+
+The retrieval backend (MiniLM) is similarly small: 22M parameters,
+384-d embeddings, a few hundred kilobytes of weights, and CPU
+inference. The whole stack fits comfortably under the assignment's
+``runs on a standard personal computer'' constraint.
+
+% ============================================================
+\section{Results (model-side excerpt)}
+\label{sec:results}
+
+The full evaluation harness is owned by the Evaluation Lead. The
+table below reports the headline numbers attributable to the model
+choice. Scores are means across 12 evaluation questions on the 1--5
+rubric defined in \verb|src/evaluate.py|.
+
+\begin{table}[h]
+\centering
+\caption{Mean evaluation scores across 12 questions, 1--5 scale
+(higher is better).}
+\label{tab:evaluation-summary}
+\begin{tabularx}{\linewidth}{lXXXXX}
+\toprule
+System & Corr. & Ground. & Retr. & Useful. & Style \\
+\midrule
+Baseline                   & 2.60 & 2.33 & 1.00 & 3.00 & 3.00 \\
+RAG (phi3 + MiniLM)        & \textbf{4.20} & \textbf{3.00} & \textbf{4.83} & \textbf{3.17} & 3.00 \\
+\midrule
+$\Delta$                   & +1.60 & +0.67 & +3.83 & +0.17 & 0.00 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{Interpretation.} Retrieval gains (+3.83) come from MiniLM,
+which retrieves the on-topic scene at average cosine similarity
+0.45--0.72. Correctness gains (+1.60) come from phi3: it can fuse the
+retrieved scene summaries into a coherent beginner-friendly answer
+that a fixed-template generator cannot produce. Grounding (+0.67) and
+style (0.00) are weaker -- phi3 paraphrases evidence rather than
+emitting verbatim ``Act $i$, Scene $j$'' citations, and its stylised
+verse is fluent but does not always include the discrete archaic
+markers our rubric counts. A stricter system prompt could close
+either gap; we deliberately did \emph{not} apply that constraint here
+so the report reflects the unconstrained behaviour of phi3:3.8b.
+
+% ============================================================
+\section{Representative Prompts}
+\label{app:prompts}
+
+System prompt (\verb|prompts/system_prompt.txt|):
+
+\begin{verbatim}
+You are a Shakespeare-aware assistant.
+Use the retrieved context to answer the user's
+question.
+Your answer must be beginner-friendly.
+If the retrieved context is insufficient,
+say so clearly.
+Do not invent unsupported details.
+If asked to produce a Shakespearean-style
+response, keep it under 150 words and make clear
+that it is creative output, not textual evidence.
+\end{verbatim}
+
+\medskip
+Stylised prompt (\verb|prompts/stylised_prompt.txt|):
+
+\begin{verbatim}
+You are a Shakespeare-aware assistant producing
+a short stylised response.
+Rules:
+- Maximum 150 words.
+- Adopt early-modern English register
+  ("thou", "thy", "ere", "o'er", "doth").
+- Creative output; must be labelled as such.
+- Remain interpretable to a beginner.
+- Use the retrieved scenes only as inspiration
+  for themes (ambition, love, prophecy, etc.);
+  do not quote them as the user's question.
+\end{verbatim}
+
+% ============================================================
+\section{GenAI Usage (model-side rows)}
+\label{app:genai}
+
+\begin{table*}[h]
+\centering
+\caption{Model Lead's contribution to the group's GenAI usage log.}
+\begin{tabularx}{\textwidth}{p{2.2cm} p{3.4cm} p{3.4cm} X}
+\toprule
+Tool & Prompt or Task & Useful output & Verification / Modification \\
+\midrule
+ChatGPT / Claude
+& ``Write a small wrapper around the Ollama HTTP API that exposes a single \texttt{generate(prompt)} method.''
+& Suggested a 70-line \texttt{OllamaGenerator} class with an \texttt{available()} probe and a 120\,s request timeout.
+& Adopted, after testing end-to-end against \texttt{phi3:3.8b}. We added the silent fall-back to the extractive composer ourselves. \\
+\midrule
+ChatGPT / Claude
+& ``Draft a Shakespeare-aware system prompt that keeps the model grounded in retrieved context.''
+& Returned a 6-line prompt emphasising beginner-friendliness, refusal on insufficient evidence, and a 150-word cap on stylised output.
+& Accepted as v1. Tested by running \texttt{python evaluate.py} on all 12 questions; results in Sec.~\ref{sec:results}. A stricter citation-forcing variant was considered and discussed in the failure analysis. \\
+\midrule
+ChatGPT / Claude
+& ``Suggest archaic register substitutions for a stylised generator (\texttt{you} $\to$ \texttt{thou}, \ldots).''
+& Provided pairs incl.\ \texttt{before}$\to$\texttt{ere}, \texttt{over}$\to$\texttt{o'er}, \texttt{often}$\to$\texttt{oft}.
+& Cherry-picked the conservative substitutions that round-trip safely; discarded those that produced ungrammatical output. \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\end{document}

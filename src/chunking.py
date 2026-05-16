@@ -1,82 +1,203 @@
 """
-Chunking utilities.
+Chunking utilities for the Shakespeare RAG system.
 
-Students should implement and justify a chunking strategy.
-This starter file provides a simple default: one input record becomes one retrieval chunk.
+Two strategies are implemented:
+
+``scene``
+    One chunk per scene. The chunk text concatenates speaker turns inside
+    the scene and is prefixed with a one-line modern-English
+    ``scene_summary`` (when present in the source data) so that the
+    embedding model captures both the original Early-Modern English wording
+    and a beginner-friendly paraphrase. This is the default strategy
+    because Shakespeare scenes are self-contained narrative units that
+    retain enough surrounding context to explain individual quotes.
+
+``utterance``
+    One chunk per speaker turn. Retained for diagnostic comparison.
+    Utterance chunks are short and precise but frequently lose the context
+    required to answer "why?"-style questions.
+
+Every chunk preserves play / act / scene / speaker metadata so retrieved
+evidence can be traced back to the source text.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
+
+from config import CHUNK_STRATEGY, PLAY_DISPLAY_NAME
 
 
 Record = Dict[str, Any]
 Chunk = Dict[str, Any]
 
 
-def _get_text(record: Record) -> str:
-    """
-    Extract text from a record using common field names.
-    Adapt this function if your dataset uses different names.
-    """
-    for key in ["text", "utterance", "excerpt", "content", "passage"]:
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _record_text(record):
+    """Return the cleanest text field present in a record."""
+    for key in ("text", "utterance", "excerpt", "content", "passage"):
         value = record.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
-
-    # Fallback: combine selected fields if no obvious text field exists.
-    parts = []
-    for key in ["speaker", "summary", "modern_summary"]:
-        value = record.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value.strip())
-
-    return " ".join(parts).strip()
+    return ""
 
 
-def create_chunks(records: List[Record]) -> List[Chunk]:
-    """
-    Convert structured records into retrieval chunks.
+def _normalise_play_name(record):
+    play_field = record.get("play")
+    if isinstance(play_field, str) and play_field.strip():
+        return play_field.strip()
+    return PLAY_DISPLAY_NAME.get(record.get("play_key", ""), "Unknown play")
 
-    This is intentionally simple. Students should consider whether a different strategy
-    is better, such as:
-    - scene-level chunks;
-    - speaker-turn chunks;
-    - overlapping fixed-size chunks;
-    - summary-enhanced chunks.
-    """
-    chunks: List[Chunk] = []
 
-    for i, record in enumerate(records):
-        text = _get_text(record)
-        if not text:
+def _scene_key(record):
+    """Group records into scenes using the dataset-provided scene id."""
+    sid = record.get("scene_id")
+    if isinstance(sid, str) and sid:
+        return sid
+    play = record.get("play_key") or _normalise_play_name(record).lower()
+    act = record.get("act")
+    scene = record.get("scene")
+    if act is None or scene is None:
+        return None
+    return f"{play}_{act}_{scene}"
+
+
+# ---------------------------------------------------------------------------
+# Strategies
+# ---------------------------------------------------------------------------
+
+
+def _utterance_chunks(records):
+    chunks = []
+    for i, rec in enumerate(records):
+        text = _record_text(rec)
+        if not text or rec.get("speaker") == "STAGE_DIRECTION":
+            # Stage directions are not useful for evidence-grounded answers.
             continue
-
-        chunk = {
-            "chunk_id": record.get("source_id") or record.get("id") or f"chunk_{i:06d}",
-            "play": record.get("play", record.get("play_key", "unknown")),
-            "act": record.get("act", None),
-            "scene": record.get("scene", None),
-            "speaker": record.get("speaker", None),
-            "text": text,
-            "metadata": record,
-        }
-        chunks.append(chunk)
-
+        chunks.append(
+            {
+                "chunk_id": rec.get("source_id") or rec.get("utterance_id") or f"u_{i:06d}",
+                "play": _normalise_play_name(rec),
+                "act": rec.get("act"),
+                "scene": rec.get("scene"),
+                "speaker": rec.get("speaker"),
+                "scene_summary": rec.get("scene_summary"),
+                "keywords": rec.get("keywords", []),
+                "text": text,
+                "chunk_type": "utterance",
+            }
+        )
     return chunks
 
 
-def format_chunk_for_display(chunk: Chunk) -> str:
-    """
-    Format a retrieved chunk for display to the user.
-    """
+def _scene_chunks(records):
+    """Group records into one chunk per scene."""
+    grouped = {}
+
+    for rec in records:
+        key = _scene_key(rec)
+        if key is None:
+            continue
+        text = _record_text(rec)
+        speaker = rec.get("speaker")
+        if speaker == "STAGE_DIRECTION":
+            piece = text
+        else:
+            piece = f"{speaker}: {text}" if speaker and text else text
+
+        if not piece:
+            continue
+
+        bucket = grouped.setdefault(
+            key,
+            {
+                "chunk_id": key,
+                "play": _normalise_play_name(rec),
+                "act": rec.get("act"),
+                "scene": rec.get("scene"),
+                "scene_summary": rec.get("scene_summary"),
+                "keywords": list(rec.get("keywords", []) or []),
+                "speakers": [],
+                "pieces": [],
+                "chunk_type": "scene",
+            },
+        )
+        if speaker and speaker != "STAGE_DIRECTION" and speaker not in bucket["speakers"]:
+            bucket["speakers"].append(speaker)
+        bucket["pieces"].append(piece)
+
+    chunks = []
+    for key, bucket in grouped.items():
+        scene_body = "\n".join(bucket.pop("pieces"))
+        summary = bucket.get("scene_summary") or ""
+        keywords = bucket.get("keywords") or []
+        header_parts = []
+        if summary:
+            header_parts.append(f"Scene summary: {summary}")
+        if keywords:
+            header_parts.append("Keywords: " + ", ".join(keywords))
+        header_parts.append(
+            f"This is {bucket.get('play')}, Act {bucket.get('act')}, "
+            f"Scene {bucket.get('scene')}."
+        )
+        indexed_text = "\n".join(header_parts) + "\n\n" + scene_body
+        chunks.append(
+            {
+                **bucket,
+                "speaker": ", ".join(bucket["speakers"][:6]),
+                "text": indexed_text,
+                "scene_body": scene_body,
+            }
+        )
+    return chunks
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def create_chunks(records, strategy=CHUNK_STRATEGY):
+    """Convert structured records into retrieval chunks using ``strategy``."""
+    if strategy == "scene":
+        return _scene_chunks(records)
+    if strategy == "utterance":
+        return _utterance_chunks(records)
+    raise ValueError(f"Unknown chunking strategy: {strategy}")
+
+
+def format_chunk_for_display(chunk, max_chars=600):
+    """Format a retrieved chunk for human-readable display."""
     play = chunk.get("play", "Unknown play")
     act = chunk.get("act", "?")
     scene = chunk.get("scene", "?")
-    speaker = chunk.get("speaker", "")
+    speaker = chunk.get("speaker") or ""
 
     header = f"{play}, Act {act}, Scene {scene}"
     if speaker:
-        header += f", Speaker: {speaker}"
+        header += f" | Speakers: {speaker}"
 
-    return f"[{header}]\n{chunk.get('text', '')}"
+    body = chunk.get("scene_body") or chunk.get("text", "")
+    if len(body) > max_chars:
+        body = body[: max_chars - 3].rstrip() + "..."
+    summary = chunk.get("scene_summary")
+    if summary:
+        return f"[{header}]\nSummary: {summary}\n{body}"
+    return f"[{header}]\n{body}"
+
+
+if __name__ == "__main__":
+    from data_loader import load_all_plays
+
+    records = load_all_plays()
+    scene_chunks = create_chunks(records, "scene")
+    utterance_chunks = create_chunks(records, "utterance")
+    print(f"Loaded {len(records)} records.")
+    print(f"Scene chunks: {len(scene_chunks)}")
+    print(f"Utterance chunks: {len(utterance_chunks)}")
+    print()
+    print(format_chunk_for_display(scene_chunks[0], max_chars=300))

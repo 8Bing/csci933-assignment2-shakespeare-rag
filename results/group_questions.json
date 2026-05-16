@@ -1,0 +1,51 @@
+[
+  {
+    "question_id": "G1",
+    "question": "What role does Lady Macbeth play in the plot to kill Duncan?",
+    "expected_focus": "Lady Macbeth persuades Macbeth, plans the murder, manipulates him, frames the guards.",
+    "type": "contextual_qa",
+    "rationale": "Tests retrieval depth on a named secondary character whose key scenes are spread across Acts 1 and 2."
+  },
+  {
+    "question_id": "G2",
+    "question": "Who are the witches in Macbeth and why are their prophecies important?",
+    "expected_focus": "Three witches deliver prophecies of kingship and ambition that drive Macbeth's choices.",
+    "type": "concept_explanation",
+    "rationale": "Tests whether retrieval connects the witches' prophecy scenes with the later consequences."
+  },
+  {
+    "question_id": "G3",
+    "question": "Why does Romeo agree to marry Juliet so quickly?",
+    "expected_focus": "Sudden love, family feud, hope marriage will reconcile the families.",
+    "type": "contextual_qa",
+    "rationale": "Probes how the system handles a question whose answer is split between Romeo's lines and Friar Lawrence's reasoning."
+  },
+  {
+    "question_id": "G4",
+    "question": "What happens at the end of Romeo and Juliet?",
+    "expected_focus": "Romeo and Juliet die, the Montague and Capulet families reconcile.",
+    "type": "contextual_qa",
+    "rationale": "Tests retrieval of late-play scenes (Act 5) and whether the system can summarise the resolution."
+  },
+  {
+    "question_id": "G5",
+    "question": "Tell me about the ghost in Hamlet in plain English.",
+    "expected_focus": "Ghost of Hamlet's father, claims to have been murdered, asks Hamlet for revenge.",
+    "type": "concept_explanation",
+    "rationale": "Tests beginner-friendly explanation: question uses 'plain English' to require an accessible answer."
+  },
+  {
+    "question_id": "G6",
+    "question": "What's a banana?",
+    "expected_focus": "Out-of-domain question; the system should refuse or note insufficient evidence.",
+    "type": "out_of_domain",
+    "rationale": "Robustness probe. The corpus contains no Shakespearean text about bananas, so a faithful system should explicitly fail rather than hallucinate."
+  },
+  {
+    "question_id": "G7",
+    "question": "Write a short Shakespearean-style monologue from Macbeth after he hears the witches' prophecy.",
+    "expected_focus": "Creative stylised output; ambition, prophecy, internal conflict, kingship.",
+    "type": "stylised_generation",
+    "rationale": "Style-quality probe. The output must adopt archaic register and be labelled as creative, not evidence."
+  }
+]
