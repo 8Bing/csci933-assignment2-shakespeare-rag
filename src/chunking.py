@@ -27,6 +27,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from config import CHUNK_STRATEGY, PLAY_DISPLAY_NAME
 
+import re
 
 Record = Dict[str, Any]
 Chunk = Dict[str, Any]
@@ -64,7 +65,50 @@ def _scene_key(record):
     if act is None or scene is None:
         return None
     return f"{play}_{act}_{scene}"
+# ---------------------------------------------------------------------------
+# Preprocessing
+# ---------------------------------------------------------------------------
 
+
+REMOVE_SPEAKERS = ["FLOURISH"]
+
+
+def preprocess_records(records):
+    """
+    Clean and normalize Shakespeare records before chunking.
+    """
+
+    cleaned_records = []
+
+    for rec in records:
+
+        speaker = (rec.get("speaker") or "").strip()
+
+        # Skip unwanted records
+        if speaker in REMOVE_SPEAKERS:
+            continue
+
+        # Clean text spacing
+        text = _record_text(rec)
+        text = re.sub(r"\s+", " ", text).strip()
+
+        if not text:
+            continue
+
+        cleaned = {
+            "play": _normalise_play_name(rec),
+            "act": rec.get("act"),
+            "scene": rec.get("scene"),
+            "scene_id": _scene_key(rec),
+            "speaker": speaker,
+            "scene_summary": rec.get("scene_summary"),
+            "keywords": rec.get("keywords", []),
+            "text": text,
+        }
+
+        cleaned_records.append(cleaned)
+
+    return cleaned_records
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -80,7 +124,8 @@ def _utterance_chunks(records):
             continue
         chunks.append(
             {
-                "chunk_id": rec.get("source_id") or rec.get("utterance_id") or f"u_{i:06d}",
+                # "chunk_id": rec.get("source_id") or rec.get("utterance_id") or f"u_{i:06d}",
+                "chunk_id": f"u_{i:06d}",
                 "play": _normalise_play_name(rec),
                 "act": rec.get("act"),
                 "scene": rec.get("scene"),
@@ -192,12 +237,43 @@ def format_chunk_for_display(chunk, max_chars=600):
 
 if __name__ == "__main__":
     from data_loader import load_all_plays
+    import json
 
-    records = load_all_plays()
-    scene_chunks = create_chunks(records, "scene")
-    utterance_chunks = create_chunks(records, "utterance")
-    print(f"Loaded {len(records)} records.")
+    # Load raw records
+    raw_records = load_all_plays()
+
+    # Preprocess records
+    cleaned_records = preprocess_records(raw_records)
+
+    # Show BEFORE vs AFTER
+    print("=" * 80)
+    print("RAW RECORD")
+    print("=" * 80)
+    print(json.dumps(raw_records[0], indent=2))
+
+    print("\n")
+    print("=" * 80)
+    print("CLEANED RECORD")
+    print("=" * 80)
+    print(json.dumps(cleaned_records[0], indent=2))
+
+    # Create chunks
+    scene_chunks = create_chunks(cleaned_records, "scene")
+    utterance_chunks = create_chunks(cleaned_records, "utterance")
+
+    print("\n")
+    print("=" * 80)
+    print("CHUNK STATISTICS")
+    print("=" * 80)
+
+    print(f"Raw records: {len(raw_records)}")
+    print(f"Cleaned records: {len(cleaned_records)}")
     print(f"Scene chunks: {len(scene_chunks)}")
     print(f"Utterance chunks: {len(utterance_chunks)}")
-    print()
+
+    print("\n")
+    print("=" * 80)
+    print("SAMPLE SCENE CHUNK")
+    print("=" * 80)
+
     print(format_chunk_for_display(scene_chunks[0], max_chars=300))
