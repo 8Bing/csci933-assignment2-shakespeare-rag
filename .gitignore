@@ -86,3 +86,10 @@ secrets.json
 
 report/main.pdf
 
+
+# Original assignment files — provided separately, not part of submission
+report/assignment2_slm_report_template.tex
+report/assignment2_slm_report_template.pdf
+report/assignment2_slm_shakespeare_specification.pdf
+report/IEEEtran.cls
+report/model_lead_contribution.*
