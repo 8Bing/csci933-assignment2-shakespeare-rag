@@ -65,13 +65,64 @@ def _scene_key(record):
     if act is None or scene is None:
         return None
     return f"{play}_{act}_{scene}"
+
+def is_stage_event(speaker):
+    """
+    Detect theatrical/stage-event pseudo-speakers.
+    """
+
+    if not speaker:
+        return False
+
+    speaker = speaker.strip().upper()
+
+    # Known stage-event labels
+    if speaker in NON_CHARACTER_SPEAKERS:
+        return True
+
+    # Single uppercase non-character words
+    if speaker.isupper() and " " not in speaker and len(speaker) > 2:
+        common_characters = {
+            "HAMLET",
+            "MACBETH",
+            "HORATIO",
+            "OTHELLO",
+            "ROMEO",
+            "JULIET",
+        }
+
+        if speaker not in common_characters:
+            theatrical_terms = {
+                "THUNDER",
+                "MUSIC",
+                "ALARUM",
+                "ALARUMS",
+                "DRUMS",
+                "TRUMPETS",
+                "FLOURISH",
+            }
+
+            if speaker in theatrical_terms:
+                return True
+
+    return False
 # ---------------------------------------------------------------------------
 # Preprocessing
 # ---------------------------------------------------------------------------
 
 
-REMOVE_SPEAKERS = ["FLOURISH"]
-
+NON_CHARACTER_SPEAKERS = {
+    "FLOURISH",
+    "THUNDER",
+    "MUSIC",
+    "ALARUM",
+    "ALARUMS",
+    "DRUMS",
+    "TRUMPETS",
+    "SENNET",
+    # "EXEUNT",
+    # "EXUNT",
+}
 
 def preprocess_records(records):
     """
@@ -85,7 +136,7 @@ def preprocess_records(records):
         speaker = (rec.get("speaker") or "").strip()
 
         # Skip unwanted records
-        if speaker in REMOVE_SPEAKERS:
+        if is_stage_event(speaker):
             continue
 
         # Clean text spacing
@@ -124,8 +175,7 @@ def _utterance_chunks(records):
             continue
         chunks.append(
             {
-                # "chunk_id": rec.get("source_id") or rec.get("utterance_id") or f"u_{i:06d}",
-                "chunk_id": f"u_{i:06d}",
+                "chunk_id": rec.get("source_id") or f"u_{i:06d}",
                 "play": _normalise_play_name(rec),
                 "act": rec.get("act"),
                 "scene": rec.get("scene"),
@@ -150,7 +200,7 @@ def _scene_chunks(records):
         text = _record_text(rec)
         speaker = rec.get("speaker")
         if speaker == "STAGE_DIRECTION":
-            piece = text
+            piece = f"[STAGE_DIRECTION] {text}"
         else:
             piece = f"{speaker}: {text}" if speaker and text else text
 
@@ -208,10 +258,11 @@ def _scene_chunks(records):
 
 def create_chunks(records, strategy=CHUNK_STRATEGY):
     """Convert structured records into retrieval chunks using ``strategy``."""
+    cleaned_records = preprocess_records(records)
     if strategy == "scene":
-        return _scene_chunks(records)
+        return _scene_chunks(cleaned_records)
     if strategy == "utterance":
-        return _utterance_chunks(records)
+        return _utterance_chunks(cleaned_records)
     raise ValueError(f"Unknown chunking strategy: {strategy}")
 
 
@@ -258,8 +309,8 @@ if __name__ == "__main__":
     print(json.dumps(cleaned_records[0], indent=2))
 
     # Create chunks
-    scene_chunks = create_chunks(cleaned_records, "scene")
-    utterance_chunks = create_chunks(cleaned_records, "utterance")
+    scene_chunks = create_chunks(raw_records, "scene")
+    utterance_chunks = create_chunks(raw_records, "utterance")
 
     print("\n")
     print("=" * 80)
