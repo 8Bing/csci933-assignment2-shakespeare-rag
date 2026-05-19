@@ -183,6 +183,16 @@ def score_style(answer: str) -> Optional[int]:
     return 1
 
 
+def _is_refusal(answer: str) -> bool:
+    lower = answer.lower()
+    return any(p in lower for p in (
+        "cannot find", "do not appear", "no keyword match", "placeholder",
+        "not in the corpus", "outside the scope", "not relevant", "cannot answer",
+        "no relevant", "beyond the scope", "no information", "out of scope",
+        "doesn't appear", "does not appear", "not about", "unrelated",
+    ))
+
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
@@ -231,11 +241,20 @@ def run_evaluation() -> Dict[str, Any]:
             ("baseline", baseline_answer, []),
             ("rag", rag_answer, retrieved),
         ]:
-            corr = score_correctness(answer, expected_focus) if qtype != "stylised_generation" else None
             ground = score_grounding(answer)
-            ret = score_retrieval(retrieved_for_system, expected_play) if system_name == "rag" else 1
-            useful = score_usefulness(answer, has_citation=ground == 5)
+            ret = score_retrieval(retrieved_for_system, expected_play) if system_name == "rag" else None
             style = score_style(answer) if qtype == "stylised_generation" else None
+
+            if qtype == "out_of_domain":
+                refused = _is_refusal(answer)
+                corr = 5 if refused else 1
+                useful = 5 if refused else 1
+            elif qtype == "stylised_generation":
+                corr = None
+                useful = score_usefulness(answer, has_citation=ground == 5)
+            else:
+                corr = score_correctness(answer, expected_focus)
+                useful = score_usefulness(answer, has_citation=ground == 5)
 
             row = {
                 "question_id": qid,
@@ -310,24 +329,41 @@ def run_evaluation() -> Dict[str, Any]:
     return summary
 
 
+_SCORE_COLS = (
+    "correctness_score",
+    "grounding_score",
+    "retrieval_relevance_score",
+    "usefulness_score",
+    "style_quality_score",
+)
+
+
+def _bucket_stats(subset: List[Dict[str, Any]]) -> Dict[str, Any]:
+    b: Dict[str, Any] = {"n": len(subset)}
+    for col in _SCORE_COLS:
+        values = [r[col] for r in subset if r[col] is not None]
+        b[f"mean_{col}"] = round(statistics.mean(values), 3) if values else None
+        b[f"n_{col}"] = len(values)
+    return b
+
+
 def _summarise(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
+
     for system in ("baseline", "rag"):
-        sub = [r for r in rows if r["system"] == system]
-        bucket: Dict[str, Any] = {"n": len(sub)}
-        for col in (
-            "correctness_score",
-            "grounding_score",
-            "retrieval_relevance_score",
-            "usefulness_score",
-            "style_quality_score",
-        ):
-            values = [r[col] for r in sub if r[col] is not None]
-            bucket[f"mean_{col}"] = (
-                round(statistics.mean(values), 3) if values else None
+        out[system] = _bucket_stats([r for r in rows if r["system"] == system])
+
+    qtypes = sorted({r["question_type"] for r in rows})
+    by_type: Dict[str, Any] = {}
+    for qtype in qtypes:
+        by_type[qtype] = {
+            system: _bucket_stats(
+                [r for r in rows if r["question_type"] == qtype and r["system"] == system]
             )
-            bucket[f"n_{col}"] = len(values)
-        out[system] = bucket
+            for system in ("baseline", "rag")
+        }
+    out["by_type"] = by_type
+
     return out
 
 

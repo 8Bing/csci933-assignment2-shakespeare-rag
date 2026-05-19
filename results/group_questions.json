@@ -47,5 +47,26 @@
     "expected_focus": "Creative stylised output; ambition, prophecy, internal conflict, kingship.",
     "type": "stylised_generation",
     "rationale": "Style-quality probe. The output must adopt archaic register and be labelled as creative, not evidence."
+  },
+  {
+    "question_id": "G8",
+    "question": "Find the scene where Hamlet speaks to Yorick's skull and show me the relevant passage.",
+    "expected_focus": "Act 5 Scene 1, graveyard scene, Hamlet holds Yorick's skull and reflects on mortality.",
+    "type": "evidence_retrieval",
+    "rationale": "Tests precise retrieval of a specific iconic passage with correct play/act/scene metadata."
+  },
+  {
+    "question_id": "G9",
+    "question": "Show me the passage where Lady Macbeth tries to wash imaginary blood from her hands.",
+    "expected_focus": "Act 5 Scene 1, sleepwalking scene, Lady Macbeth guilt and madness.",
+    "type": "evidence_retrieval",
+    "rationale": "Tests retrieval of an iconic moment with correct speaker and scene metadata."
+  },
+  {
+    "question_id": "G10",
+    "question": "Write a short Shakespearean-style response in which Hamlet expresses his grief over his father's death.",
+    "expected_focus": "Creative stylised output; grief, betrayal, soliloquy format, archaic register.",
+    "type": "stylised_generation",
+    "rationale": "Second style probe to allow comparison of style quality across two different plays and characters."
   }
 ]
