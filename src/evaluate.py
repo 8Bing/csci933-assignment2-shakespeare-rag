@@ -162,9 +162,20 @@ def score_retrieval(retrieved: List[Tuple[Chunk, float]], expected_play: Optiona
     return 1
 
 
+_REFUSAL_PHRASES = (
+    "cannot find", "do not appear", "does not appear", "doesn't appear",
+    "no keyword match", "placeholder", "not in the corpus",
+    "outside the scope", "outside my knowledge", "out of scope",
+    "not relevant", "no relevant", "not about", "unrelated",
+    "cannot answer", "unable to find", "unable to answer",
+    "beyond the scope", "no information", "no mention",
+    "not covered", "cannot provide", "lack information",
+)
+
+
 def score_usefulness(answer: str, has_citation: bool) -> int:
     words = re.findall(r"[A-Za-z']+", answer)
-    if any(p in answer.lower() for p in ("cannot find", "do not appear", "no keyword match", "placeholder")):
+    if any(p in answer.lower() for p in _REFUSAL_PHRASES):
         return 1
     if len(words) >= 25 and has_citation:
         return 5
@@ -184,13 +195,12 @@ def score_style(answer: str) -> Optional[int]:
 
 
 def _is_refusal(answer: str) -> bool:
+    # Require both a negative phrase AND a short answer (<40 words) to avoid
+    # false positives where the model hedges but then provides real content.
     lower = answer.lower()
-    return any(p in lower for p in (
-        "cannot find", "do not appear", "no keyword match", "placeholder",
-        "not in the corpus", "outside the scope", "not relevant", "cannot answer",
-        "no relevant", "beyond the scope", "no information", "out of scope",
-        "doesn't appear", "does not appear", "not about", "unrelated",
-    ))
+    has_negative = any(p in lower for p in _REFUSAL_PHRASES)
+    is_short = len(answer.split()) < 40
+    return has_negative and is_short
 
 
 # ---------------------------------------------------------------------------
@@ -241,20 +251,33 @@ def run_evaluation() -> Dict[str, Any]:
             ("baseline", baseline_answer, []),
             ("rag", rag_answer, retrieved),
         ]:
-            ground = score_grounding(answer)
-            ret = score_retrieval(retrieved_for_system, expected_play) if system_name == "rag" else None
             style = score_style(answer) if qtype == "stylised_generation" else None
 
             if qtype == "out_of_domain":
                 refused = _is_refusal(answer)
                 corr = 5 if refused else 1
                 useful = 5 if refused else 1
-            elif qtype == "stylised_generation":
-                corr = None
-                useful = score_usefulness(answer, has_citation=ground == 5)
+                ground = None
+                ret = None
             else:
-                corr = score_correctness(answer, expected_focus)
-                useful = score_usefulness(answer, has_citation=ground == 5)
+                ground = score_grounding(answer)
+                ret = score_retrieval(retrieved_for_system, expected_play) if system_name == "rag" else None
+                if qtype == "stylised_generation":
+                    corr = None
+                    useful = score_usefulness(answer, has_citation=ground == 5)
+                else:
+                    corr = score_correctness(answer, expected_focus)
+                    useful = score_usefulness(answer, has_citation=ground == 5)
+
+            # RAG cited a play/scene (ground >= 3) but retrieved chunks from the
+            # wrong play (ret == 1) — response is not supported by what was retrieved.
+            potential_hallucination = (
+                system_name == "rag"
+                and ground is not None
+                and ret is not None
+                and ground >= 3
+                and ret == 1
+            )
 
             row = {
                 "question_id": qid,
@@ -270,6 +293,7 @@ def run_evaluation() -> Dict[str, Any]:
                 "retrieval_relevance_score": ret,
                 "usefulness_score": useful,
                 "style_quality_score": style,
+                "potential_hallucination": potential_hallucination,
                 "comments": "",
             }
             rows.append(row)
@@ -296,7 +320,7 @@ def run_evaluation() -> Dict[str, Any]:
         "question_id", "question", "question_type", "source", "expected_focus",
         "system", "retrieved_passages", "generated_response",
         "correctness_score", "grounding_score", "retrieval_relevance_score",
-        "usefulness_score", "style_quality_score", "comments",
+        "usefulness_score", "style_quality_score", "potential_hallucination", "comments",
     ]
     with OUTPUT_CSV.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -313,6 +337,10 @@ def run_evaluation() -> Dict[str, Any]:
     summary["retrieval_backend"] = bot.backend_name
     summary["n_chunks_indexed"] = len(bot.chunks)
     summary["n_questions"] = len(questions)
+    summary["potential_hallucinations"] = [
+        {"question_id": r["question_id"], "system": r["system"], "question": r["question"]}
+        for r in rows if r.get("potential_hallucination")
+    ]
     with OUTPUT_SUMMARY.open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
@@ -321,6 +349,16 @@ def run_evaluation() -> Dict[str, Any]:
     print("Evaluation summary")
     print("=" * 60)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+    flagged = summary["potential_hallucinations"]
+    print()
+    if flagged:
+        print(f"Potential hallucinations ({len(flagged)}):")
+        for h in flagged:
+            print(f"  [{h['system']:8s}] {h['question_id']}: {h['question']}")
+    else:
+        print("No potential hallucinations detected.")
+
     print()
     print(f"Wrote {OUTPUT_CSV.relative_to(RESULTS_DIR.parent)}")
     print(f"Wrote {OUTPUT_JSONL.relative_to(RESULTS_DIR.parent)}")
@@ -337,6 +375,17 @@ _SCORE_COLS = (
     "style_quality_score",
 )
 
+# Preferred weights for the composite score. When a criterion is N/A for a
+# subset (e.g. style is only scored for stylised questions), its weight is
+# dropped and the remaining weights are renormalised so they still sum to 1.
+_SCORE_WEIGHTS: Dict[str, float] = {
+    "correctness_score": 0.30,
+    "grounding_score": 0.25,
+    "retrieval_relevance_score": 0.20,
+    "usefulness_score": 0.20,
+    "style_quality_score": 0.05,
+}
+
 
 def _bucket_stats(subset: List[Dict[str, Any]]) -> Dict[str, Any]:
     b: Dict[str, Any] = {"n": len(subset)}
@@ -344,6 +393,18 @@ def _bucket_stats(subset: List[Dict[str, Any]]) -> Dict[str, Any]:
         values = [r[col] for r in subset if r[col] is not None]
         b[f"mean_{col}"] = round(statistics.mean(values), 3) if values else None
         b[f"n_{col}"] = len(values)
+
+    # Weighted composite over whichever criteria are applicable in this subset.
+    applicable = {col: w for col, w in _SCORE_WEIGHTS.items() if b[f"mean_{col}"] is not None}
+    if applicable:
+        total_weight = sum(applicable.values())
+        b["composite_score"] = round(
+            sum(b[f"mean_{col}"] * w / total_weight for col, w in applicable.items()),
+            3,
+        )
+    else:
+        b["composite_score"] = None
+
     return b
 
 
