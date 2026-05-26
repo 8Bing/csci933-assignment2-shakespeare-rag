@@ -19,6 +19,7 @@
 \usepackage{amssymb}
 \usepackage[a4paper,margin=2cm]{geometry}
 \setlength{\columnsep}{0.6cm}
+\usepackage{tabularx}
 
 \hypersetup{
     colorlinks=true,
@@ -106,88 +107,109 @@ where the composer's strict grounding hurts surface-level correctness.
 
 % ============================================================
 \section{Dataset and Preprocessing}
-\label{sec:dataset}
+An existing structured Shakespeare dialogue set was used for the project that included all three required plays (Hamlet, Macbeth and Romeo and Juliet).
 
-\textbf{Relevant marks: Dataset preparation and documentation (15 marks).}
+The set was developed for RAG and modeled the plays as hierarchy of scenes of utterances, metadata and context: Each scene comprised a number of utterances with speaker labels, dialogue text, scene id, and other metadata. Additional context was given through the \texttt{scene\_summary} and \texttt{keywords}.
 
-The corpus is the instructor-provided structured dataset of the three
-required plays. Each play is stored as a JSON document
-(\verb|data/processed/<play>.json|) of the form
-\verb|{"metadata": {...}, "scenes": [...]}| in which every scene
-contains a list of speaker-tagged utterances together with a curated
-modern-English \verb|scene_summary| and a small \verb|keywords| list.
-The instructor materials state that this preprocessing is supplementary
-to the Project Gutenberg base text; our system uses only the structured
-JSON, not the raw text. We make no claims about the original Project
-Gutenberg copy.
+The scene summaries provided a modern-English description of what occurred in the scene.The keywords provided a list of prominent subjects, topics, or characters to aid in retrieval. Normalizing: During the normalization stage of preprocessing, the corpus was normalized to provide more consistent retrieval representations and to unneeded meta-data.The original data set contained both sourceid and utteranceid which were discovered to be always equal, and So there was no need to have them distinct, so only one was supplied as the retrieval chunk id. In the same way, both speaker and speaker original data were supplied but as all speaker original data was only used in the sense of upper/lower case and abbreviated versions (e.g. Ber and bernardo) the normalised speaker data was used. Whitespace and formatting issues were processed with text normalisation using regular-expression substitution.
+
+Multiple whitespace and newline characters were compressed to a single space to improve embedding uniformity and avoid retrieval noise.Records with null or badly encoded fields were discarded. The non character theatrical markers and structural artifacts that were not useful for retrieval were further filtered out.
+
+These included labels such as {FLOURISH} or {THUNDER} or {ALARUM} or {MUSIC} or location headings such as {ELSINORE} or {VERONA}.
+
+\begin{verbatim}
+	[STAGE_DIRECTION] Enter Ghost.
+\end{verbatim}
+
+This allowed the embedding model to distinguish between spoken dialogue and narrative stage actions while preserving important contextual information.
+
+The preprocessing pipeline therefore transformed the dataset from a raw literary transcription into a retrieval-oriented representation suitable for semantic search and evidence-grounded question answering.
+
 
 \subsection{Dataset schema}
 
-Our loader (\verb|src/data_loader.py|) flattens the scene hierarchy into
-utterance-level records with the schema:
+After preprocessing, each retrieval record retained only the metadata required for retrieval, traceability, and evaluation. The processed schema preserved contextual information including play, act, scene, speaker identity, summaries, and source identifiers.
 
-\begin{verbatim}
-{
-  "play": "Macbeth",
-  "play_key": "macbeth",
-  "act": 1,
-  "scene": 3,
-  "scene_id": "macbeth_1_3",
-  "scene_summary": "Witches greet Macbeth ...",
-  "keywords": ["prophecy", "witches"],
-  "speaker": "MACBETH",
-  "text": "So foul and fair a day I have not seen.",
-  "source_id": "macbeth_1_3_macbeth_001"
-}
-\end{verbatim}
+An example processed record is shown below:
+\begin{quote}
+	\small
+	\begin{ttfamily}
+		\begin{flushleft}
+			\{
+			\newline
+			"play": "Macbeth",
+			\newline
+			"act": 1,
+			\newline
+			"scene": 3,
+			\newline
+			"speaker": "MACBETH",
+			\newline
+			"scene\_summary": "Macbeth and Banquo encounter the witches.",
+			\newline
+			"keywords": ["witches", "prophecy", "Banquo"],
+			\newline
+			"text": "So foul and fair a day I have not seen.",
+			\newline
+			"chunk\_id": "macbeth\_1\_3\_0001"
+			\newline
+			\}
+		\end{flushleft}
+	\end{ttfamily}
+\end{quote}
+Each processed retrieval chunk preserved:
+\begin{itemize}
+	\item \texttt{play}: source play title;
+	\item \texttt{act} and \texttt{scene}: narrative location within the play;
+	\item \texttt{speaker}: normalised speaker label;
+	\item \texttt{scene\_summary}: modern-English contextual summary;
+	\item \texttt{keywords}: semantic topic hints;
+	\item \texttt{text}: dialogue or stage direction content;
+	\item \texttt{chunk\_id}: traceable source identifier.
+\end{itemize}
 
-After flattening, the three plays yield \textbf{3{,}613} utterance
-records. The instructor-curated scene summaries and keywords are the
-\emph{only} supplementary content used. They are treated as supporting
-explanatory material and are clearly labelled as ``Scene summary'' and
-``Keywords'' anywhere they appear in retrieval text or answers.
-
+The inclusion of summaries and keywords provided supplementary semantic information that improved embedding quality and retrieval recall, particularly for beginner-oriented questions where users may not use Shakespearean wording directly.
 \subsection{Chunking strategy}
 
-Two chunking strategies are implemented and exposed via
-\verb|chunking.create_chunks(records, strategy)|:
 
-\textbf{Scene-level chunking} (default). One chunk per scene
-($73$ scenes total). Each chunk's indexed text concatenates, in order:
+The system primarily used scene-level chunking. In this strategy, all utterances belonging to a single scene were combined into one retrieval chunk. Scene-level chunking was selected because Shakespearean dialogue is highly contextual and meaning often depends on surrounding interactions between multiple speakers. Questions such as ``Why is Horatio afraid?'' or ``Why does Macbeth hesitate?'' require narrative context beyond a single line of dialogue.
 
-\begin{enumerate}
-    \item a line beginning ``Scene summary: \ldots'' carrying the
-        curated modern-English summary;
-    \item a line beginning ``Keywords: \ldots'' listing the curated
-        concept tags;
-    \item a line of the form ``This is \emph{play}, Act $i$, Scene $j$''
-        to make the citation lexically visible to the embedder;
-    \item the joined ``\textsc{Speaker}: line'' representation of every
-        utterance in the scene (stage directions retained but not
-        tagged as speakers).
-\end{enumerate}
+Each scene chunk included:
+\begin{itemize}
+	\item speaker dialogue;
+	\item stage directions;
+	\item scene summaries;
+	\item keywords;
+	\item play, act, and scene metadata.
+\end{itemize}
 
-\textbf{Utterance-level chunking} (diagnostic). One chunk per speaker
-turn ($2{,}690$ chunks). Provided for direct comparison: short, lexically
-specific chunks improve precision on simple lookups but typically lose
-the surrounding narrative context that ``why''-style questions require.
+This allowed retrieval to preserve conversational flow, emotional progression, and narrative continuity. The scene summaries and keywords were prepended to the chunk text before embedding generation so that the vector representation captured both the original Early Modern English dialogue and a simplified semantic explanation of the scene.
 
-We justify the default in two ways. First, Shakespeare scenes are
-designed as self-contained narrative units, so a scene-sized chunk
-naturally bounds the context required to explain a single quote.
-Second, every scene already comes with a one-sentence modern-English
-summary and a short keyword list; prepending these to the chunk lets
-the embedder match queries phrased in modern English against passages
-written four centuries ago. Empirically (Sec.~\ref{sec:results}) this
-strategy is sufficient to keep top-1 retrieval relevance above 4.8/5
-across the twelve evaluation questions.
+An alternative utterance-level chunking strategy was also implemented for comparison purposes. In utterance chunking, each speaker turn became an individual retrieval chunk. This approach produced smaller and more precise retrieval units that were effective for direct quote lookups or speaker identification tasks. However, utterance-level chunks frequently lacked sufficient narrative context to answer explanatory ``why'' or ``how'' questions.
 
-\textbf{Filtering.} Stage-direction-only records (\verb|speaker| ==
-\verb|"STAGE_DIRECTION"|) are dropped from the utterance strategy and
-kept as un-tagged narrative inside the scene strategy. We do no other
-cleaning: capitalisation, punctuation, and Early-Modern spelling are
-preserved verbatim so the system can quote the source faithfully.
+The trade-offs between the two strategies are summarised below:
 
+\begin{table}[ht]
+	\centering
+	\small
+	\begin{tabularx}{\textwidth}{|p{3cm}|X|X|}
+		\hline
+		\textbf{Strategy} & \textbf{Advantages} & \textbf{Disadvantages} \\
+		\hline
+		Scene-level chunking &
+		Preserves context and narrative flow; stronger for semantic reasoning &
+		Larger chunks may introduce retrieval noise \\
+		\hline
+		Utterance-level chunking &
+		High precision for quote retrieval; smaller embeddings &
+		Frequently loses surrounding context \\
+		\hline
+	\end{tabularx}
+	\caption{Comparison of chunking strategies}
+\end{table}
+Other chunking strategies, such as fixed-size token chunking, recursive chunking, and semantic topic-based chunking, were considered but not implemented in the final system. Fixed-size chunking can arbitrarily divide dialogue and stage directions, potentially separating important conversational context across chunk boundaries. Recursive and semantic chunking approaches may preserve semantic coherence more effectively, but they introduce additional preprocessing complexity and computational overhead that was unnecessary for the relatively well-structured Shakespeare dataset.
+
+Since the plays are already naturally divided into acts and scenes, scene-level structural chunking provided a simpler and more interpretable retrieval representation while still preserving narrative continuity. For the scope of this assignment, scene-level chunking represented an effective balance between retrieval quality, contextual preservation, implementation simplicity, and explainability. Utterance-level chunking was retained as a secondary strategy primarily for diagnostic comparison and direct quote retrieval tasks.
 % ============================================================
 \section{Methodology}
 \label{sec:methodology}
@@ -657,7 +679,7 @@ F.~Pedregosa et~al., ``Scikit-learn: Machine learning in Python,''
 % ============================================================
 % Appendices
 % ============================================================
-\appendices
+
 
 \section{Full evaluation table}
 \label{app:evaluation}
