@@ -148,12 +148,65 @@ def score_grounding(answer: str) -> int:
     return 1
 
 
-def score_retrieval(retrieved: List[Tuple[Chunk, float]], expected_play: Optional[str]) -> int:
+def _roman_to_int(s: str) -> int:
+    """Convert a digit string or Roman numeral to int."""
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    roman = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
+    result, prev = 0, 0
+    for ch in reversed(s.lower()):
+        v = roman.get(ch, 0)
+        result += v if v >= prev else -v
+        prev = v
+    return result
+
+
+def _parse_expected_scene(expected_focus: str) -> Optional[Tuple[int, int]]:
+    """Extract (act, scene) from expected_focus free text.
+
+    Handles: "Act 5 Scene 1", "Act 5, Scene 1", "act v scene i", "5.1".
+    Returns None if no act/scene pattern is found.
+    """
+    m = re.search(
+        r"act\s+(\d+|[ivxlc]+).*?scene\s+(\d+|[ivxlc]+)",
+        expected_focus,
+        re.IGNORECASE,
+    )
+    if m:
+        return _roman_to_int(m.group(1)), _roman_to_int(m.group(2))
+    m = re.search(r"\b(\d+)\.(\d+)\b", expected_focus)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def score_retrieval(
+    retrieved: List[Tuple[Chunk, float]],
+    expected_play: Optional[str],
+    expected_scene: Optional[Tuple[int, int]] = None,
+) -> int:
     if not retrieved:
         return 1
     if expected_play is None:
         # We cannot pin to a play -- award 3 (passed but unverified).
         return 3
+
+    # evidence_retrieval questions require scene-level precision.
+    if expected_scene is not None:
+        exp_act, exp_scn = expected_scene
+        for chunk, _ in retrieved:
+            if (chunk.get("play") == expected_play
+                    and chunk.get("act") == exp_act
+                    and chunk.get("scene") == exp_scn):
+                return 5
+        # Right play retrieved but not the specific requested scene.
+        if any(c.get("play") == expected_play for c, _ in retrieved):
+            return 3
+        return 1
+
+    # Default: play-level check (sufficient for concept/contextual questions).
     top_play = retrieved[0][0].get("play", "")
     if top_play == expected_play:
         return 5
@@ -249,6 +302,14 @@ def run_evaluation() -> Dict[str, Any]:
 
         rag_generator = rag_result["generator"]
 
+        expected_scene: Optional[Tuple[int, int]] = None
+        if qtype == "evidence_retrieval":
+            expected_scene = _parse_expected_scene(expected_focus)
+            assert expected_scene is not None, (
+                f"[BUG] {qid}: evidence_retrieval question has no parseable "
+                f"act/scene in expected_focus: {expected_focus!r}"
+            )
+
         for system_name, answer, retrieved_for_system in [
             ("baseline", baseline_answer, []),
             ("rag", rag_answer, retrieved),
@@ -263,7 +324,7 @@ def run_evaluation() -> Dict[str, Any]:
                 ret = None
             else:
                 ground = score_grounding(answer)
-                ret = score_retrieval(retrieved_for_system, expected_play) if system_name == "rag" else None
+                ret = score_retrieval(retrieved_for_system, expected_play, expected_scene) if system_name == "rag" else None
                 if qtype == "stylised_generation":
                     corr = None
                     useful = score_usefulness(answer, has_citation=ground == 5)

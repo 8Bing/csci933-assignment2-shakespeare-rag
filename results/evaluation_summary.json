@@ -17,15 +17,15 @@
     "n": 15,
     "mean_correctness_score": 4.167,
     "n_correctness_score": 12,
-    "mean_grounding_score": 4.571,
+    "mean_grounding_score": 5,
     "n_grounding_score": 14,
-    "mean_retrieval_relevance_score": 5,
+    "mean_retrieval_relevance_score": 4.714,
     "n_retrieval_relevance_score": 14,
-    "mean_usefulness_score": 4.467,
+    "mean_usefulness_score": 5,
     "n_usefulness_score": 15,
     "mean_style_quality_score": 3.667,
     "n_style_quality_score": 3,
-    "composite_score": 4.47
+    "composite_score": 4.626
   },
   "by_type": {
     "concept_explanation": {
@@ -47,15 +47,15 @@
         "n": 4,
         "mean_correctness_score": 4.5,
         "n_correctness_score": 4,
-        "mean_grounding_score": 4.5,
+        "mean_grounding_score": 5,
         "n_grounding_score": 4,
         "mean_retrieval_relevance_score": 5,
         "n_retrieval_relevance_score": 4,
-        "mean_usefulness_score": 4.5,
+        "mean_usefulness_score": 5,
         "n_usefulness_score": 4,
         "mean_style_quality_score": null,
         "n_style_quality_score": 0,
-        "composite_score": 4.605
+        "composite_score": 4.842
       }
     },
     "contextual_qa": {
@@ -77,15 +77,15 @@
         "n": 5,
         "mean_correctness_score": 3.4,
         "n_correctness_score": 5,
-        "mean_grounding_score": 4.6,
+        "mean_grounding_score": 5,
         "n_grounding_score": 5,
         "mean_retrieval_relevance_score": 5,
         "n_retrieval_relevance_score": 5,
-        "mean_usefulness_score": 4.6,
+        "mean_usefulness_score": 5,
         "n_usefulness_score": 5,
         "mean_style_quality_score": null,
         "n_style_quality_score": 0,
-        "composite_score": 4.305
+        "composite_score": 4.495
       }
     },
     "evidence_retrieval": {
@@ -109,13 +109,13 @@
         "n_correctness_score": 2,
         "mean_grounding_score": 5,
         "n_grounding_score": 2,
-        "mean_retrieval_relevance_score": 5,
+        "mean_retrieval_relevance_score": 3,
         "n_retrieval_relevance_score": 2,
         "mean_usefulness_score": 5,
         "n_usefulness_score": 2,
         "mean_style_quality_score": null,
         "n_style_quality_score": 0,
-        "composite_score": 5.0
+        "composite_score": 4.579
       }
     },
     "out_of_domain": {
@@ -167,15 +167,15 @@
         "n": 3,
         "mean_correctness_score": null,
         "n_correctness_score": 0,
-        "mean_grounding_score": 4.333,
+        "mean_grounding_score": 5,
         "n_grounding_score": 3,
         "mean_retrieval_relevance_score": 5,
         "n_retrieval_relevance_score": 3,
-        "mean_usefulness_score": 3.667,
+        "mean_usefulness_score": 5,
         "n_usefulness_score": 3,
         "mean_style_quality_score": 3.667,
         "n_style_quality_score": 3,
-        "composite_score": 4.286
+        "composite_score": 4.905
       }
     }
   },

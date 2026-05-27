@@ -51,6 +51,13 @@ Each criterion is scored 1–5. Descriptions below define what each score means.
 
 > **Note:** Mark as **N/A** for all Baseline rows (no retrieval takes place).
 
+> **Auto-scoring note:** The automated `score_retrieval()` produces only 1 / 3 / 5:
+> - **5** = exact act + scene match (for `evidence_retrieval`) or top chunk from correct play (all other types)
+> - **3** = correct play retrieved but wrong scene (for `evidence_retrieval`), or any chunk from correct play (other types)
+> - **1** = wrong play or nothing retrieved
+>
+> Scores of **2** and **4** require manual review — e.g. "right play but completely off-topic" → 2; "right scene but partially incomplete retrieval" → 4. Manual adjustments may be recorded in the `comments` column; final summary means should reflect the adjusted values.
+
 ---
 
 ### Usefulness
