@@ -400,62 +400,237 @@ model weights; we do not call any random sampler in the generators.
 
 \textbf{Relevant marks: Evaluation, comparison, and error analysis (20 marks).}
 
-\subsection{Evaluation questions}
+\subsection{Question set}
 
-We evaluate on 12 questions: 5 instructor-provided (Q1--Q5) and 7
-group-designed (G1--G7). The group questions are stored in
-\verb|results/group_questions.json|. They are designed to test
-different aspects of the system not exercised by Q1--Q5:
+The evaluation corpus comprises \textbf{15 questions}: five
+instructor-provided (Q1--Q5) and ten group-designed (G1--G10), stored
+in \verb|results/instructor_questions.json| and
+\verb|results/group_questions.json| respectively.
+Table~\ref{tab:question-types} shows the distribution by type.
+
+\begin{table}[h]
+\centering
+\caption{Evaluation question distribution by type.}
+\label{tab:question-types}
+\small
+\begin{tabular}{lcc}
+\toprule
+Type & $n$ & Questions \\
+\midrule
+\texttt{contextual\_qa}       & 5 & Q1, Q4, G1, G3, G4 \\
+\texttt{concept\_explanation} & 4 & Q2, Q3, G2, G5     \\
+\texttt{stylised\_generation} & 3 & Q5, G7, G10         \\
+\texttt{evidence\_retrieval}  & 2 & G8, G9              \\
+\texttt{out\_of\_domain}      & 1 & G6                  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The group questions are designed to test aspects of the system not
+exercised by Q1--Q5:
 
 \begin{itemize}
-    \item G1, G2 -- depth on secondary characters
-        (Lady Macbeth, the witches) whose key scenes span multiple
-        acts.
-    \item G3, G4 -- multi-scene reasoning across \emph{Romeo and
-        Juliet}.
-    \item G5 -- the explicit ``in plain English'' modifier, testing
-        whether the system honours a beginner-friendliness cue.
-    \item G6 -- the deliberately out-of-domain probe
-        (\emph{``What's a banana?''}). A faithful system should refuse
-        rather than hallucinate.
-    \item G7 -- a second stylised generation request, paired with the
-        instructor's Q5, to test style quality independently of who
-        speaks.
+    \item \textbf{G1, G2} -- secondary-character depth (Lady Macbeth;
+        the witches) whose key scenes span multiple acts.
+    \item \textbf{G3, G4} -- multi-scene reasoning across
+        \emph{Romeo and Juliet}.
+    \item \textbf{G5} -- the explicit ``in plain English'' modifier,
+        testing whether the system honours a beginner-friendliness cue.
+    \item \textbf{G6} -- a deliberate out-of-domain probe
+        (\emph{``What's a banana?''}). A scope-aware system should
+        refuse rather than answer from general world knowledge.
+    \item \textbf{G7} -- a second stylised-generation request
+        (Macbeth monologue), paired with Q5 (Juliet), to isolate
+        style quality from character choice.
+    \item \textbf{G8, G9} -- scene-specific evidence retrieval:
+        \emph{``Find the scene where Hamlet speaks to Yorick's skull''}
+        (expected: Act~5, Scene~1) and \emph{``Show me the passage
+        where Lady Macbeth tries to wash imaginary blood from her
+        hands''} (expected: Act~5, Scene~1). These stress-test the
+        retriever's \emph{scene-level} precision, not just play-level
+        relevance.
+    \item \textbf{G10} -- a third stylised-generation request
+        (Hamlet grief soliloquy), bringing the stylised sample to
+        three for within-type comparison.
 \end{itemize}
 
 \subsection{Scoring criteria}
 
-We use a 1, 3, 5 scale per the assignment guidance. The scoring is
-deterministic and implemented in \verb|src/evaluate.py| so that it is
-auditable and re-runnable:
+Five criteria are scored on a 1--5 scale and implemented
+deterministically in \verb|src/evaluate.py|. The automated scorer
+emits values in $\{1, 3, 5\}$; intermediate scores (2, 4) require
+manual annotation and may be recorded in the \texttt{comments} column
+of the CSV per the rubric in \verb|docs/scoring_rubric.md|.
 
 \begin{itemize}
-    \item \textbf{Correctness} (1, 3, 5): fraction of the
-        ``expected\_focus'' content words present in the answer:
-        $\geq$0.5 $\to$ 5; $>0 \to$ 3; $0 \to$ 1.
-        Not scored for stylised questions.
-    \item \textbf{Grounding} (1, 3, 5): 5 if the answer cites
-        ``Act $i$, Scene $j$''; 3 if it names a play but no scene;
-        1 otherwise.
-    \item \textbf{Retrieval relevance} (1, 3, 5): 5 if the top
-        retrieved chunk is from the expected play, 3 if any retrieved
-        chunk is, 1 otherwise. The baseline scores 1 by construction
-        because it has no retrieval.
+    \item \textbf{Correctness} (1, 3, 5): fraction of
+        \texttt{expected\_focus} content words present in the answer:
+        $\geq$0.5 $\to$ 5; $>$0 $\to$ 3; 0 $\to$ 1. Not scored for
+        \texttt{stylised\_generation} (N/A). For
+        \texttt{out\_of\_domain}, a correctly detected refusal
+        scores 5; an answer scores 1.
+
+    \item \textbf{Grounding} (1, 3, 5): 5 if the answer contains
+        an explicit ``Act~$i$, Scene~$j$'' citation; 3 if it names a
+        play; 1 otherwise. Not scored for \texttt{out\_of\_domain}.
+
+    \item \textbf{Retrieval relevance} (1, 3, 5): for
+        \texttt{contextual\_qa}, \texttt{concept\_explanation}, and
+        \texttt{stylised\_generation}, 5 if the top retrieved chunk is
+        from the expected play, 3 if any retrieved chunk is, 1
+        otherwise. For \texttt{evidence\_retrieval} questions the
+        scorer requires an exact act-and-scene match for 5; returning
+        the right play but the wrong scene scores 3. This distinction
+        is implemented via \verb|_parse_expected_scene()| in
+        \verb|evaluate.py|, which extracts the expected act/scene from
+        the \texttt{expected\_focus} free text and passes it to
+        \verb|score_retrieval()|. Baseline rows and
+        \texttt{out\_of\_domain} rows are marked N/A.
+
     \item \textbf{Usefulness} (1, 3, 5): 5 if the answer is
         $\geq$25 informative words \emph{and} carries an explicit
-        citation; 3 if either condition fails; 1 if the answer is
-        essentially a refusal.
-    \item \textbf{Style quality} (1, 3, 5): for stylised questions
-        only -- 5 if the answer contains $\geq$3 archaic markers
-        (\texttt{thou}, \texttt{thy}, \texttt{ere}, \texttt{o'er},
-        \texttt{hark}, \texttt{thine}, \texttt{doth}, \texttt{didst}),
-        3 if $\geq$1, 1 otherwise.
+        citation (grounding $=$ 5); 3 if either condition fails; 1 if
+        the answer matches a refusal phrase. For
+        \texttt{out\_of\_domain}, a refusal scores 5 and an answer
+        scores 1.
+
+    \item \textbf{Style quality} (1, 3, 5): for
+        \texttt{stylised\_generation} questions only -- 5 if the
+        answer contains $\geq$3 archaic markers (\texttt{thou},
+        \texttt{thy}, \texttt{ere}, \texttt{o'er}, \texttt{hark},
+        \texttt{thine}, \texttt{doth}, \texttt{didst}); 3 if
+        $\geq$1; 1 otherwise.
 \end{itemize}
 
-We acknowledge that automated scoring on a 12-question corpus is
-coarse. Where the heuristic disagreed with human reading in our pilot,
-we made the disagreement visible in Sec.~\ref{sec:failure-analysis}
-rather than tuning the metric to cover it up.
+A weighted composite score is computed per question as:
+\[
+    c = \frac{\displaystyle\sum_{k \in \mathcal{A}} w_k \cdot s_k}
+             {\displaystyle\sum_{k \in \mathcal{A}} w_k}
+\]
+where $\mathcal{A}$ is the set of applicable criteria for that
+question type, with weights $w_\text{corr} = 0.30$,
+$w_\text{ground} = 0.25$, $w_\text{retr} = 0.20$,
+$w_\text{use} = 0.20$, $w_\text{style} = 0.05$.
+N/A criteria are excluded and the remaining weights are renormalised.
+
+A \textbf{potential-hallucination flag} is raised when the RAG system
+cites a play or scene (grounding $\geq$ 3) but the retrieved chunks
+are from the wrong play (retrieval relevance $=$ 1), indicating a
+citation not supported by the actual retrieved evidence.
+No potential hallucinations were detected in the final evaluation run.
+
+\subsection{Two-stage scoring methodology}
+
+The five criteria above are applied in two complementary stages that
+together constitute the full evaluation.
+
+\textbf{Stage 1 -- automated scoring (\texttt{evaluate.py}).}
+The harness scores every response programmatically using surface-level
+heuristics: word-overlap ratios, regular expressions for citation
+patterns, and keyword presence. This produces reproducible, auditable
+scores that can be regenerated from scratch by running
+\texttt{python evaluate.py}. The fundamental constraint of this
+approach is that a heuristic can only make reliable three-way
+distinctions: clearly wrong, partial, clearly right. So the
+automated scores are restricted to $\{1, 3, 5\}$. Attempting to emit
+2 or 4 automatically would introduce arbitrary thresholds and a false
+impression of precision.
+
+\textbf{Stage 2 -- human review (\texttt{docs/scoring\_rubric.md}).}
+The rubric defines the full 1--5 scale for human evaluators who read
+each response in context. A human can apply genuine judgment, for
+example, ``this answer cites the correct play and roughly the right
+scene but omits one key character'' warrants a 4 on grounding, not a
+3, in a way that no regex can. The rubric provides a consistent
+reference point so that all team members score the same row the same
+way. Manual adjustments and their rationale are recorded in the
+\texttt{comments} column of \verb|evaluation_results.csv|; final
+summary means should reflect the manually adjusted values.
+
+\textbf{Why this design.} Separating automated from manual scoring is
+standard practice in NLP system evaluation~\cite{lewis2020rag}. The
+automated stage provides coverage and reproducibility across all 30
+rows at negligible cost; the manual stage adds the precision and
+semantic understanding that heuristics cannot provide. The two
+artefacts are therefore complementary: \verb|evaluate.py| is not a
+replacement for the rubric, nor is the rubric a critique of the
+automated scorer. Each does what the other cannot.
+
+\subsection{Evaluation procedure}
+
+The evaluation harness (\verb|src/evaluate.py|) runs both systems on
+every question in a single pass and writes three artefacts:
+
+\begin{itemize}
+    \item \verb|evaluation_results.csv| -- 30 rows
+        (15 questions $\times$ 2 systems), one row per
+        question--system pair;
+    \item \verb|evaluation_results.jsonl| -- same rows with full
+        chunk metadata (rank, cosine similarity, play/act/scene);
+    \item \verb|evaluation_summary.json| -- criterion means per
+        system and per question type, plus composite scores,
+        generator provenance, and the potential-hallucination list.
+\end{itemize}
+
+\textbf{Generator transparency.} Every CSV row carries a
+\texttt{generator\_path} column recording which generator produced
+the response: \texttt{ollama/phi3:3.8b} (normal path),
+\texttt{extractive\_fallback} or \texttt{stylised\_fallback} (Ollama
+unavailable), \texttt{low\_similarity\_refusal} (retrieval score
+below threshold), or \texttt{prompt\_only\_baseline}. The summary
+JSON records the union of generator paths used across the run.
+In the reported results, \texttt{generators\_used} contains
+\texttt{["low\_similarity\_refusal", "ollama/phi3:3.8b",
+"prompt\_only\_baseline"]}, confirming that phi3 generated every
+in-scope RAG response and that the refusal path fired exactly once
+(G6).
+
+\textbf{Out-of-domain threshold.}
+A \texttt{min\_retrieval\_score} of 0.15 is applied before calling
+phi3. If the top retrieved chunk scores below this threshold the
+system returns a canned refusal rather than forwarding the query to
+phi3, which would otherwise answer from general world knowledge. The
+banana probe (G6) returned a top cosine similarity of 0.085;
+all in-scope Shakespeare questions scored above 0.55.
+
+\subsection{Limitations of the scoring approach}
+
+\begin{itemize}
+    \item \textbf{Coarse auto-scorer.} The automated heuristics
+        produce only $\{1, 3, 5\}$. Intermediate values (2, 4) require
+        manual annotation. The scorer is intentionally simple so it is
+        transparent and fully reproducible, but may under- or
+        over-score edge cases.
+
+    \item \textbf{Correctness is token-overlap only.} The metric
+        counts \texttt{expected\_focus} content words in the answer.
+        It rewards lexical matches but cannot assess semantic
+        accuracy: a wrong answer that repeats the expected terms would
+        score 5.
+
+    \item \textbf{Retrieval is scene-level for
+        \texttt{evidence\_retrieval}, play-level elsewhere.}
+        For G8 and G9 the scorer correctly penalises wrong-scene
+        retrieval (score 3 rather than 5); for all other question
+        types only the play is checked. The evidence-retrieval
+        retrieval-relevance mean of 3.0 reflects a genuine system
+        limitation: \texttt{all-MiniLM-L6-v2} retrieves the correct
+        play reliably but, in both cases, returns an earlier scene
+        rather than Act~5, Scene~1. This is discussed further in
+        Sec.~\ref{sec:failure-analysis}.
+
+    \item \textbf{phi3 temperature.} phi3:3.8b is called with
+        \texttt{temperature}$=0.2$, introducing minor
+        non-determinism. In practice we observed negligible score
+        variation across re-runs. All reported results are from a
+        single canonical run with \texttt{generators\_used}
+        confirmed in the summary JSON.
+
+    \item \textbf{Small question set.} With 15 questions, per-type
+        means rest on 1--5 items and should be interpreted with
+        caution. The \texttt{evidence\_retrieval} composite of 4.579
+        is the average of exactly two questions.
+\end{itemize}
 
 % ============================================================
 \section{Results and Analysis}
@@ -465,119 +640,181 @@ rather than tuning the metric to cover it up.
 
 \subsection{Baseline versus RAG}
 
-Table~\ref{tab:evaluation-summary} reports mean scores across the 12
-questions. The RAG system outperforms the prompt-only baseline on
-\emph{every} criterion. The biggest gain is in retrieval relevance
-(+3.83): the baseline has no retriever by construction, while the
-RAG system uses MiniLM embeddings to score the top-1 retrieved scene
-at an average cosine similarity of 0.45--0.72 across the evaluation
-set. Correctness rises substantially (+1.60) because phi3 can
-\emph{combine} the retrieved scene summaries with its own
-instruction-tuned phrasing into a coherent, beginner-friendly
-explanation that a fixed-template generator cannot produce.
-Grounding improves more modestly (+0.67): phi3 sometimes
-paraphrases the retrieved evidence rather than emitting a literal
-``Act $i$, Scene $j$'' citation, even when the retrieved chunk
-header makes that information available. Stylised output ties
-the baseline at 3.0: phi3's stylised verse is more fluent than the
-template baseline but does not always include the discrete archaic
-markers (\texttt{thou}, \texttt{thy}, \texttt{ere}) that our
-deterministic rubric counts. We discuss both effects in
-Sec.~\ref{sec:failure-analysis}.
+Table~\ref{tab:evaluation-summary} reports mean criterion scores
+across all 15 questions (applicable rows only; N/A criteria excluded
+from each mean). The RAG system outperforms the prompt-only baseline
+on every assessed criterion, with a composite score of $4.626$ versus
+$2.663$.
 
 \begin{table}[h]
 \centering
-\caption{Mean evaluation scores across 12 questions, 1--5 scale (higher is better).}
+\caption{Mean scores (1--5), 15 questions. Retrieval relevance is N/A
+for the baseline (no retriever). Composite weights:
+$w_\text{corr}=0.30$, $w_\text{grnd}=0.25$, $w_\text{ret}=0.20$,
+$w_\text{use}=0.20$, $w_\text{sty}=0.05$.}
 \label{tab:evaluation-summary}
-\begin{tabularx}{\linewidth}{lXXXXX}
+\small
+\begin{tabularx}{\linewidth}{lXXXXXX}
 \toprule
-System & Corr. & Ground. & Retr. & Useful. & Style \\
+System & Corr. & Grnd. & Retr. & Use. & Style & Comp. \\
 \midrule
-Baseline                     & 2.60 & 2.33 & 1.00 & 3.00 & 3.00 \\
-RAG (phi3 + MiniLM)          & \textbf{4.20} & \textbf{3.00} & \textbf{4.83} & \textbf{3.17} & 3.00 \\
+Baseline         & 2.67 & 2.43 & N/A  & 2.87 & 3.00 & 2.663 \\
+RAG (phi3+MiniLM)& \textbf{4.17} & \textbf{5.00} & \textbf{4.71} & \textbf{5.00} & \textbf{3.67} & \textbf{4.626} \\
 \midrule
-$\Delta$                    & +1.60 & +0.67 & +3.83 & +0.17 & 0.00 \\
+$\Delta$         & $+$1.50 & $+$2.57 & --- & $+$2.13 & $+$0.67 & $+$1.963 \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
+The largest absolute gains are in \textbf{grounding} ($+2.57$) and
+\textbf{usefulness} ($+2.13$). Grounding reached the maximum mean of
+$5.0$: the system prompt's explicit citation instruction (``Always
+cite the play, act, and scene number'') caused phi3 to emit structured
+``Act~$i$, Scene~$j$'' references in virtually every factual response,
+satisfying the rubric's top-level criterion.
+Usefulness follows grounding mechanically, the heuristic scores 5
+only when both length ($\geq$25 words) and an explicit citation are
+present, so the grounding improvement propagated directly.
+\textbf{Correctness} rises by $+1.50$: phi3 synthesises an actual
+answer from the retrieved context rather than copying a scene
+summary verbatim, so the expected-focus content words appear more
+reliably. \textbf{Style quality} improves by $+0.67$, though phi3's
+verse is inconsistent (discussed in Sec.~\ref{sec:failure-analysis}).
+
+\subsection{Per-type breakdown}
+
+Table~\ref{tab:by-type} breaks down RAG performance by question type.
+Retrieval relevance is $5.0$ for all types where the expected play can
+be inferred, except \texttt{evidence\_retrieval} ($3.0$), which
+requires scene-level precision (Sec.~\ref{sec:failure-analysis}).
+\texttt{out\_of\_domain} achieves a perfect composite of $5.0$: the
+similarity-threshold guard correctly refused the out-of-scope query
+(G6, cosine similarity $0.085$), avoiding the general-knowledge
+hallucination that the unguarded system produced.
+
+\begin{table}[h]
+\centering
+\caption{RAG mean scores by question type (1--5). N/A: criterion not
+applicable to type. $n$ = number of questions.}
+\label{tab:by-type}
+\small
+\begin{tabularx}{\linewidth}{lXXXXXX}
+\toprule
+Type & $n$ & Corr & Grnd & Retr & Use & Comp \\
+\midrule
+\texttt{concept\_expl.}   & 4 & 4.50 & 5.00 & 5.00 & 5.00 & 4.842 \\
+\texttt{contextual\_qa}   & 5 & 3.40 & 5.00 & 5.00 & 5.00 & 4.495 \\
+\texttt{evidence\_retr.}  & 2 & 5.00 & 5.00 & 3.00 & 5.00 & 4.579 \\
+\texttt{out\_of\_domain}  & 1 & 5.00 & N/A  & N/A  & 5.00 & 5.000 \\
+\texttt{stylised\_gen.}   & 3 & N/A  & 5.00 & 5.00 & 5.00 & 4.905 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The weakest per-type correctness is \texttt{contextual\_qa} ($3.40$):
+phi3 answers causal ``why?'' questions coherently but does not always
+reproduce the specific tokens named in \texttt{expected\_focus},
+reducing the overlap score. This reflects a genuine limitation of
+the token-overlap correctness metric rather than factual error in
+most cases.
+
 \subsection{Qualitative examples}
 
-\textbf{Q1: ``Why does Macbeth kill Duncan?''}
-The RAG system returns a beginner-friendly explanation citing
-\emph{Macbeth}, Act 3, Scene 6 and quoting
-``The gracious Duncan was pitied of Macbeth\ldots''. It additionally
-surfaces curated keywords (\emph{tyranny}, \emph{resistance},
-\emph{disorder}, \emph{kingship}). The baseline returns a generic
-play summary with no citation.
+\textbf{Q1 (``Why does Macbeth kill Duncan?'' -- success).}
+The RAG system retrieves \emph{Macbeth}, Act~2, Scene~2 (similarity
+$0.758$) and Act~1, Scene~4 ($0.730$). phi3 synthesises a
+beginner-friendly answer, quotes Lady Macbeth directly
+(``That which hath made them drunk hath made me bold''), and cites
+Act~2, Scene~2 explicitly. Scores: correctness~5, grounding~5,
+retrieval~5, usefulness~5. The baseline returns a generic
+one-sentence play summary with no citation.
 
-\textbf{G2: ``Who are the witches and why are their prophecies
-important?''}
-The RAG system retrieves the witches' meeting in
-\emph{Macbeth}, Act 1, Scene 1 as top result, names them, and quotes
-``When shall we three meet again''. The baseline says nothing about
-the witches.
+\textbf{G6 (``What's a banana?'' -- out-of-domain refusal).}
+Top retrieved chunk similarity $0.085$, below the
+\texttt{min\_retrieval\_score} threshold of $0.15$. The system
+returns: \emph{``This question is outside the scope of the Shakespeare
+corpus (Hamlet, Macbeth, Romeo and Juliet). No relevant passages were
+retrieved.''} Scores: correctness~5, usefulness~5. The baseline
+answers with a generic disclaimer but does not refuse.
 
-\textbf{G7: stylised Macbeth monologue.}
-Stylised output is prefixed with the required ``[STYLISED CREATIVE
-OUTPUT \ldots]'' tag and contains archaic register markers
-(\emph{thou}, \emph{thy}, \emph{ere}, \emph{doth}). The baseline
-stylised response is shorter and lacks the seeded thematic content
-because no retrieval informs it.
+\textbf{G7 (``Write a Macbeth monologue'' -- stylised success).}
+phi3 generates a Shakespearean-style monologue grounded in the
+witches' prophecy (Act~1, Scene~3), citing it explicitly and including
+archaic markers (\emph{quoth}, \emph{forsooth}, \emph{mine},
+\emph{thee}, \emph{doth}). Prefixed with the mandatory
+``[STYLISED CREATIVE OUTPUT]'' disclosure. Scores: grounding~5,
+retrieval~5, usefulness~5, style~5.
+
+\textbf{G8 (``Find the Yorick skull scene'' -- retrieval gap).}
+The retriever returns Act~2, Scene~2 and Act~4, Scene~2 -- correct
+play, wrong scenes. phi3 nevertheless answers correctly (citing
+Act~5, Scene~1) by drawing on its training knowledge. Correctness~5,
+grounding~5, but retrieval relevance~3. This is a notable behaviour:
+phi3 compensates for retrieval failure with parametric knowledge,
+which is useful here but is a form of ungrounded generation -- the
+cited evidence was not in the retrieved context.
 
 \subsection{Failure analysis}
 \label{sec:failure-analysis}
 
-\textbf{Failure 1: lexical mismatch on broad ``why?'' questions.}
-For Q1 (``Why does Macbeth kill Duncan?'') the top retrieval is
-Macbeth Act 3 Scene 6 (after the murder, discussion of tyranny), not
-Act 1 Scene 3 (the witches' prophecy) or Act 1 Scene 7 (Lady
-Macbeth's persuasion), even though the latter are arguably the
-``correct'' scenes for the motivation. TF--IDF matches the literal
-words \emph{kill} and \emph{Duncan} more strongly than the abstract
-\emph{ambition}. A dense embedder
-(\verb|all-MiniLM-L6-v2|) or a hybrid BM25 + cross-encoder reranker
-should narrow this gap; we have wired the dense path behind the same
-API for the report but have not benchmarked it here.
+\textbf{Failure 1: scene-level retrieval gap (G8, G9).}
+Both evidence-retrieval questions target Act~5, Scene~1 -- the
+graveyard scene in \emph{Hamlet} and the sleepwalking scene in
+\emph{Macbeth}. In both cases MiniLM retrieves the correct play but
+an earlier scene (Act~2 and Act~4 in \emph{Hamlet}; Act~1 and Act~2
+in \emph{Macbeth}). The late scenes score poorly on cosine similarity
+with a query phrased in modern English: the corpus summaries for
+Act~5 do not repeat the lexical cues in the question
+(``skull'', ``wash'', ``blood''), while earlier scenes containing
+those themes score higher. A position-weighted re-ranker or
+scene-level keyword index would directly address this; it is the
+clearest extension for future work.
 
-\textbf{Failure 2: late-play retrieval bias for ``Who is X?'' queries.}
-For Q2 (``Who is Hamlet?'') the system surfaces Hamlet Act 4 Scene 2
-and 4 Scene 3 -- correct play, correct character, but late
-scenes that describe his behaviour rather than introduce him. The
-fix is structural: chunks should have a position-in-play penalty when
-the query type is \emph{concept\_explanation}. We did not implement
-this re-weighting because it requires its own evaluation, but it is
-a clear extension.
+\textbf{Failure 2: phi3 compensates with training knowledge.}
+When retrieval fails (G8, G9), phi3 draws on its own training rather
+than the retrieved context. For G8 this produces a correct answer;
+for G9, phi3 generates a plausible-looking but fabricated passage
+attributed to Lady Macbeth. Neither case triggered the
+potential-hallucination flag (which requires a grounding/retrieval
+mismatch), because phi3 emits citations from the retrieved chunk
+headers regardless of whether the cited scene was actually retrieved.
+This is a fundamental limitation of the retrieval-first prompt
+design: a fluent generative model with strong prior knowledge can
+bypass the grounding constraint.
 
-\textbf{Failure 3: phi3 paraphrases instead of citing.}
-Although the retrieved scene headers carry an explicit
-``\texttt{This is Macbeth, Act 1, Scene 3.}'' marker, phi3 often
-paraphrases the evidence (``in the witches' meeting scene'') instead
-of emitting the verbatim ``Act $i$, Scene $j$'' string our grounding
-rubric counts. The result is grounding scored at 3.0 rather than 5.0,
-even though the answer is in fact grounded. A stricter system prompt
-(``end every claim with (Play, Act $X$, Scene $Y$)'') would close
-the gap; we deliberately did \emph{not} apply that constraint in the
-results above so the report reflects the unconstrained behaviour of
-phi3:3.8b on this corpus. This is a known accuracy-vs-fluency
-trade-off in extractive RAG.
+\textbf{Failure 3: contextual\_qa correctness ceiling (mean 3.40).}
+``Why?'' questions require phi3 to synthesise multiple causal factors.
+For Q4 (``Why does Hamlet delay taking revenge?'') phi3 generates a
+coherent answer about Hamlet's philosophical indecision but cites
+Act~4, Scene~5 (a non-standard scene number) and does not reproduce
+the expected-focus tokens \emph{uncertainty}, \emph{moral hesitation},
+\emph{proof}. The response is substantively correct but scores
+correctness~1 under the token-overlap heuristic. This is the most
+visible gap between the automated correctness score and human judgment.
 
-\textbf{Failure 4: graceful out-of-domain handling.}
-G6 (``What's a banana?'') is intentionally out-of-domain. The RAG
-system correctly emits the low-confidence warning, naming the closest
-match and reporting the similarity (0.000). Our scoring rubric marks
-this as a 1 on usefulness, which is the desired behaviour: we would
-rather the system tell the user it has no evidence than fabricate one.
-A more sophisticated rubric could give partial credit for graceful
-refusal; our deterministic scorer cannot. We treat this as
-``correctness of an evaluation metric'' rather than a system failure.
+\textbf{Failure 4: style quality inconsistency (G10 scores 1).}
+For G10 (``Hamlet expresses grief in Shakespearean style'') phi3
+returns a short verbatim quote
+(``Alas, poor Yorick! I knew him'') with no archaic register markers
+beyond the quote itself. The response scores style~1 because it
+contains fewer than the required three markers. phi3's stylised
+output quality varies across questions: G7 (Macbeth monologue) scores
+style~5, while G10 and Q5 score~3 and~5 respectively. The
+inconsistency likely reflects phi3's sensitivity to the exact phrasing
+of the creative prompt.
 
-\textbf{Other observed weaknesses.}
-The stylised generator depends on the retrieved quote: when retrieval
-returns a stage direction (``Enter Macbeth, Seyton, and Soldiers'') it
-ends up in the verse. A short post-filter that drops bracketed stage
-directions before stitching would improve verse quality but was
-out-of-scope for the present submission.
+\textbf{Issues identified and resolved during development.}
+Two failure modes were found and fixed before the final evaluation
+run and are reported here for completeness.
+\emph{(a) Out-of-domain hallucination:} without the retrieval
+threshold, phi3 returned a factually correct description of a banana
+for G6, entirely ignoring the Shakespeare corpus. Fixed by adding the
+\texttt{min\_retrieval\_score}~$=0.15$ guard in
+\verb|src/rag_chatbot.py|.
+\emph{(b) Grounding paraphrasing:} phi3 cited play names but not
+act/scene numbers, scoring grounding~$\approx$3.3 on average. Fixed
+by adding an explicit citation instruction to
+\verb|prompts/system_prompt.txt|, raising mean grounding to $5.0$.
 
 % ============================================================
 \section{Responsible Use of Generative AI}
