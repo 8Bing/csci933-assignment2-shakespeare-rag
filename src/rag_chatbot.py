@@ -68,6 +68,10 @@ class RagChatbot:
     top_k: int = DEFAULT_TOP_K
     embedding_model_name: str = EMBEDDING_MODEL_NAME
     chunk_strategy: str = "scene"
+    # Minimum similarity for the top retrieved chunk before we consider the
+    # query in-scope. Below this we refuse rather than call phi3, which would
+    # otherwise answer from general world knowledge.
+    min_retrieval_score: float = 0.15
     retriever: Optional[EmbeddingRetriever] = None
     extractive: ExtractiveComposer = field(default_factory=ExtractiveComposer)
     stylised: StylisedComposer = field(default_factory=StylisedComposer)
@@ -98,13 +102,31 @@ class RagChatbot:
         qtype = classify_question(query)
         prompt = build_rag_prompt(query, retrieved)
 
+        # Refuse out-of-scope queries before reaching phi3. Without this,
+        # phi3 answers from general world knowledge regardless of retrieval.
+        top_score = retrieved[0][1] if retrieved else 0.0
+        if top_score < self.min_retrieval_score:
+            return {
+                "query": query,
+                "question_type": qtype,
+                "retrieved": retrieved,
+                "response": (
+                    "This question is outside the scope of the Shakespeare corpus "
+                    "(Hamlet, Macbeth, Romeo and Juliet). No relevant passages were retrieved."
+                ),
+                "generator": "low_similarity_refusal",
+                "prompt": prompt,
+            }
+
         # Try Ollama first (phi3:3.8b); fall back to deterministic composers.
         ollama_response = None
+        generator = ""
         try:
             from ollama_client import OllamaGenerator
             gen = OllamaGenerator()
             if gen.available():
                 ollama_response = gen.generate(prompt)
+                generator = f"ollama/{gen.model}"
         except Exception as exc:  # pragma: no cover
             print(f"[warn] Ollama call failed, using extractive fallback: {exc}")
             ollama_response = None
@@ -119,17 +141,28 @@ class RagChatbot:
             else:
                 response = ollama_response
         elif qtype == "stylised_generation":
+            print(
+                f"[WARN] Ollama unavailable — using stylised_fallback for: {query[:70]}",
+                flush=True,
+            )
             response = self.stylised.generate(query, retrieved)
+            generator = "stylised_fallback"
         else:
+            print(
+                f"[WARN] Ollama unavailable — using extractive_fallback for: {query[:70]}",
+                flush=True,
+            )
             response = self.extractive.generate(
                 query, retrieved, question_type=qtype
             )
+            generator = "extractive_fallback"
 
         return {
             "query": query,
             "question_type": qtype,
             "retrieved": retrieved,
             "response": response,
+            "generator": generator,
             "prompt": prompt,
         }
 

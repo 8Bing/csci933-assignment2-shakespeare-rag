@@ -247,6 +247,8 @@ def run_evaluation() -> Dict[str, Any]:
 
         baseline_answer = baseline_bot.generate(query)
 
+        rag_generator = rag_result["generator"]
+
         for system_name, answer, retrieved_for_system in [
             ("baseline", baseline_answer, []),
             ("rag", rag_answer, retrieved),
@@ -279,6 +281,8 @@ def run_evaluation() -> Dict[str, Any]:
                 and ret == 1
             )
 
+            generator_path = rag_generator if system_name == "rag" else "prompt_only_baseline"
+
             row = {
                 "question_id": qid,
                 "question": query,
@@ -286,6 +290,7 @@ def run_evaluation() -> Dict[str, Any]:
                 "source": q.get("source", "?"),
                 "expected_focus": expected_focus,
                 "system": system_name,
+                "generator_path": generator_path,
                 "retrieved_passages": _retrieved_passages_summary(retrieved_for_system),
                 "generated_response": answer.replace("\n", " | "),
                 "correctness_score": corr,
@@ -318,7 +323,7 @@ def run_evaluation() -> Dict[str, Any]:
     OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "question_id", "question", "question_type", "source", "expected_focus",
-        "system", "retrieved_passages", "generated_response",
+        "system", "generator_path", "retrieved_passages", "generated_response",
         "correctness_score", "grounding_score", "retrieval_relevance_score",
         "usefulness_score", "style_quality_score", "potential_hallucination", "comments",
     ]
@@ -337,6 +342,7 @@ def run_evaluation() -> Dict[str, Any]:
     summary["retrieval_backend"] = bot.backend_name
     summary["n_chunks_indexed"] = len(bot.chunks)
     summary["n_questions"] = len(questions)
+    summary["generators_used"] = sorted({r["generator_path"] for r in rows})
     summary["potential_hallucinations"] = [
         {"question_id": r["question_id"], "system": r["system"], "question": r["question"]}
         for r in rows if r.get("potential_hallucination")
