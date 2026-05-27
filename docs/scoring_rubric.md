@@ -2,7 +2,7 @@
 
 ---
 
-## Section 2 — Scoring Rubric
+## Scoring Rubric
 
 Each criterion is scored 1–5. Descriptions below define what each score means. Apply these consistently across all questions.
 
