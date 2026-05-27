@@ -148,12 +148,65 @@ def score_grounding(answer: str) -> int:
     return 1
 
 
-def score_retrieval(retrieved: List[Tuple[Chunk, float]], expected_play: Optional[str]) -> int:
+def _roman_to_int(s: str) -> int:
+    """Convert a digit string or Roman numeral to int."""
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    roman = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
+    result, prev = 0, 0
+    for ch in reversed(s.lower()):
+        v = roman.get(ch, 0)
+        result += v if v >= prev else -v
+        prev = v
+    return result
+
+
+def _parse_expected_scene(expected_focus: str) -> Optional[Tuple[int, int]]:
+    """Extract (act, scene) from expected_focus free text.
+
+    Handles: "Act 5 Scene 1", "Act 5, Scene 1", "act v scene i", "5.1".
+    Returns None if no act/scene pattern is found.
+    """
+    m = re.search(
+        r"act\s+(\d+|[ivxlc]+).*?scene\s+(\d+|[ivxlc]+)",
+        expected_focus,
+        re.IGNORECASE,
+    )
+    if m:
+        return _roman_to_int(m.group(1)), _roman_to_int(m.group(2))
+    m = re.search(r"\b(\d+)\.(\d+)\b", expected_focus)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def score_retrieval(
+    retrieved: List[Tuple[Chunk, float]],
+    expected_play: Optional[str],
+    expected_scene: Optional[Tuple[int, int]] = None,
+) -> int:
     if not retrieved:
         return 1
     if expected_play is None:
         # We cannot pin to a play -- award 3 (passed but unverified).
         return 3
+
+    # evidence_retrieval questions require scene-level precision.
+    if expected_scene is not None:
+        exp_act, exp_scn = expected_scene
+        for chunk, _ in retrieved:
+            if (chunk.get("play") == expected_play
+                    and chunk.get("act") == exp_act
+                    and chunk.get("scene") == exp_scn):
+                return 5
+        # Right play retrieved but not the specific requested scene.
+        if any(c.get("play") == expected_play for c, _ in retrieved):
+            return 3
+        return 1
+
+    # Default: play-level check (sufficient for concept/contextual questions).
     top_play = retrieved[0][0].get("play", "")
     if top_play == expected_play:
         return 5
@@ -162,9 +215,20 @@ def score_retrieval(retrieved: List[Tuple[Chunk, float]], expected_play: Optiona
     return 1
 
 
+_REFUSAL_PHRASES = (
+    "cannot find", "do not appear", "does not appear", "doesn't appear",
+    "no keyword match", "placeholder", "not in the corpus",
+    "outside the scope", "outside my knowledge", "out of scope",
+    "not relevant", "no relevant", "not about", "unrelated",
+    "cannot answer", "unable to find", "unable to answer",
+    "beyond the scope", "no information", "no mention",
+    "not covered", "cannot provide", "lack information",
+)
+
+
 def score_usefulness(answer: str, has_citation: bool) -> int:
     words = re.findall(r"[A-Za-z']+", answer)
-    if any(p in answer.lower() for p in ("cannot find", "do not appear", "no keyword match", "placeholder")):
+    if any(p in answer.lower() for p in _REFUSAL_PHRASES):
         return 1
     if len(words) >= 25 and has_citation:
         return 5
@@ -181,6 +245,15 @@ def score_style(answer: str) -> Optional[int]:
     if hits >= 1:
         return 3
     return 1
+
+
+def _is_refusal(answer: str) -> bool:
+    # Require both a negative phrase AND a short answer (<40 words) to avoid
+    # false positives where the model hedges but then provides real content.
+    lower = answer.lower()
+    has_negative = any(p in lower for p in _REFUSAL_PHRASES)
+    is_short = len(answer.split()) < 40
+    return has_negative and is_short
 
 
 # ---------------------------------------------------------------------------
@@ -227,15 +300,49 @@ def run_evaluation() -> Dict[str, Any]:
 
         baseline_answer = baseline_bot.generate(query)
 
+        rag_generator = rag_result["generator"]
+
+        expected_scene: Optional[Tuple[int, int]] = None
+        if qtype == "evidence_retrieval":
+            expected_scene = _parse_expected_scene(expected_focus)
+            assert expected_scene is not None, (
+                f"[BUG] {qid}: evidence_retrieval question has no parseable "
+                f"act/scene in expected_focus: {expected_focus!r}"
+            )
+
         for system_name, answer, retrieved_for_system in [
             ("baseline", baseline_answer, []),
             ("rag", rag_answer, retrieved),
         ]:
-            corr = score_correctness(answer, expected_focus) if qtype != "stylised_generation" else None
-            ground = score_grounding(answer)
-            ret = score_retrieval(retrieved_for_system, expected_play) if system_name == "rag" else 1
-            useful = score_usefulness(answer, has_citation=ground == 5)
             style = score_style(answer) if qtype == "stylised_generation" else None
+
+            if qtype == "out_of_domain":
+                refused = _is_refusal(answer)
+                corr = 5 if refused else 1
+                useful = 5 if refused else 1
+                ground = None
+                ret = None
+            else:
+                ground = score_grounding(answer)
+                ret = score_retrieval(retrieved_for_system, expected_play, expected_scene) if system_name == "rag" else None
+                if qtype == "stylised_generation":
+                    corr = None
+                    useful = score_usefulness(answer, has_citation=ground == 5)
+                else:
+                    corr = score_correctness(answer, expected_focus)
+                    useful = score_usefulness(answer, has_citation=ground == 5)
+
+            # RAG cited a play/scene (ground >= 3) but retrieved chunks from the
+            # wrong play (ret == 1) — response is not supported by what was retrieved.
+            potential_hallucination = (
+                system_name == "rag"
+                and ground is not None
+                and ret is not None
+                and ground >= 3
+                and ret == 1
+            )
+
+            generator_path = rag_generator if system_name == "rag" else "prompt_only_baseline"
 
             row = {
                 "question_id": qid,
@@ -244,6 +351,7 @@ def run_evaluation() -> Dict[str, Any]:
                 "source": q.get("source", "?"),
                 "expected_focus": expected_focus,
                 "system": system_name,
+                "generator_path": generator_path,
                 "retrieved_passages": _retrieved_passages_summary(retrieved_for_system),
                 "generated_response": answer.replace("\n", " | "),
                 "correctness_score": corr,
@@ -251,6 +359,7 @@ def run_evaluation() -> Dict[str, Any]:
                 "retrieval_relevance_score": ret,
                 "usefulness_score": useful,
                 "style_quality_score": style,
+                "potential_hallucination": potential_hallucination,
                 "comments": "",
             }
             rows.append(row)
@@ -275,9 +384,9 @@ def run_evaluation() -> Dict[str, Any]:
     OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "question_id", "question", "question_type", "source", "expected_focus",
-        "system", "retrieved_passages", "generated_response",
+        "system", "generator_path", "retrieved_passages", "generated_response",
         "correctness_score", "grounding_score", "retrieval_relevance_score",
-        "usefulness_score", "style_quality_score", "comments",
+        "usefulness_score", "style_quality_score", "potential_hallucination", "comments",
     ]
     with OUTPUT_CSV.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -294,6 +403,11 @@ def run_evaluation() -> Dict[str, Any]:
     summary["retrieval_backend"] = bot.backend_name
     summary["n_chunks_indexed"] = len(bot.chunks)
     summary["n_questions"] = len(questions)
+    summary["generators_used"] = sorted({r["generator_path"] for r in rows})
+    summary["potential_hallucinations"] = [
+        {"question_id": r["question_id"], "system": r["system"], "question": r["question"]}
+        for r in rows if r.get("potential_hallucination")
+    ]
     with OUTPUT_SUMMARY.open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
@@ -302,6 +416,16 @@ def run_evaluation() -> Dict[str, Any]:
     print("Evaluation summary")
     print("=" * 60)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+    flagged = summary["potential_hallucinations"]
+    print()
+    if flagged:
+        print(f"Potential hallucinations ({len(flagged)}):")
+        for h in flagged:
+            print(f"  [{h['system']:8s}] {h['question_id']}: {h['question']}")
+    else:
+        print("No potential hallucinations detected.")
+
     print()
     print(f"Wrote {OUTPUT_CSV.relative_to(RESULTS_DIR.parent)}")
     print(f"Wrote {OUTPUT_JSONL.relative_to(RESULTS_DIR.parent)}")
@@ -310,24 +434,64 @@ def run_evaluation() -> Dict[str, Any]:
     return summary
 
 
+_SCORE_COLS = (
+    "correctness_score",
+    "grounding_score",
+    "retrieval_relevance_score",
+    "usefulness_score",
+    "style_quality_score",
+)
+
+# Preferred weights for the composite score. When a criterion is N/A for a
+# subset (e.g. style is only scored for stylised questions), its weight is
+# dropped and the remaining weights are renormalised so they still sum to 1.
+_SCORE_WEIGHTS: Dict[str, float] = {
+    "correctness_score": 0.30,
+    "grounding_score": 0.25,
+    "retrieval_relevance_score": 0.20,
+    "usefulness_score": 0.20,
+    "style_quality_score": 0.05,
+}
+
+
+def _bucket_stats(subset: List[Dict[str, Any]]) -> Dict[str, Any]:
+    b: Dict[str, Any] = {"n": len(subset)}
+    for col in _SCORE_COLS:
+        values = [r[col] for r in subset if r[col] is not None]
+        b[f"mean_{col}"] = round(statistics.mean(values), 3) if values else None
+        b[f"n_{col}"] = len(values)
+
+    # Weighted composite over whichever criteria are applicable in this subset.
+    applicable = {col: w for col, w in _SCORE_WEIGHTS.items() if b[f"mean_{col}"] is not None}
+    if applicable:
+        total_weight = sum(applicable.values())
+        b["composite_score"] = round(
+            sum(b[f"mean_{col}"] * w / total_weight for col, w in applicable.items()),
+            3,
+        )
+    else:
+        b["composite_score"] = None
+
+    return b
+
+
 def _summarise(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
+
     for system in ("baseline", "rag"):
-        sub = [r for r in rows if r["system"] == system]
-        bucket: Dict[str, Any] = {"n": len(sub)}
-        for col in (
-            "correctness_score",
-            "grounding_score",
-            "retrieval_relevance_score",
-            "usefulness_score",
-            "style_quality_score",
-        ):
-            values = [r[col] for r in sub if r[col] is not None]
-            bucket[f"mean_{col}"] = (
-                round(statistics.mean(values), 3) if values else None
+        out[system] = _bucket_stats([r for r in rows if r["system"] == system])
+
+    qtypes = sorted({r["question_type"] for r in rows})
+    by_type: Dict[str, Any] = {}
+    for qtype in qtypes:
+        by_type[qtype] = {
+            system: _bucket_stats(
+                [r for r in rows if r["question_type"] == qtype and r["system"] == system]
             )
-            bucket[f"n_{col}"] = len(values)
-        out[system] = bucket
+            for system in ("baseline", "rag")
+        }
+    out["by_type"] = by_type
+
     return out
 
 
