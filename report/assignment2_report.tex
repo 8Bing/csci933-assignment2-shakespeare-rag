@@ -1038,6 +1038,31 @@ ChatGPT / Claude
 & Boilerplate IEEEtran section scaffolding.
 & Section headings and example tables.
 & Re-written for our system; the only retained boilerplate is the page-limit notice (matched the template). \\
+\midrule
+Claude Code
+& ``Read \texttt{evaluate.py} and \texttt{group\_questions.json} and tell me what improvements could be made to the harness.''
+& Six prioritised improvements: (1) baseline retrieval hardcoded to 1 instead of \texttt{null}; (2) \texttt{out\_of\_domain} questions penalise correct refusals; (3) correctness threshold too coarse; (4) grounding score too generous for character-name mentions; (5) no per-question-type breakdown; (6) no composite score column.
+& Reviewed all six findings. Accepted 1, 2, and 5 for immediate implementation; deferred 3 and 4 pending group discussion on threshold sensitivity; 6 adopted in a subsequent session. \\
+\midrule
+Claude Code
+& ``Please implement improvements 1, 2 and 5. Hold off on 3 and 4 for now. After implementing, re-run \texttt{evaluate.py} and show me the new summary.''
+& Baseline retrieval changed to \texttt{null}; out-of-domain branch added to \texttt{score\_correctness} and \texttt{score\_usefulness}; \texttt{by\_type} sub-dict added to summary output. Per-type breakdown revealed \texttt{contextual\_qa} correctness inversion (baseline 3.0 > RAG 2.6) as an open anomaly.
+& Ran the updated harness and verified per-type scores against manual spot-checks. Confirmed the out-of-domain inversion (neither system actually refusing G6) as a genuine system behaviour finding flagged in Section~\ref{sec:failure}. \\
+\midrule
+Claude Code
+& Fix \texttt{score\_retrieval} so that \texttt{evidence\_retrieval} questions check at scene level rather than just play level.
+& Updated retrieval check to compare retrieved chunk's \texttt{act}/\texttt{scene} fields against the question's \texttt{expected\_scene} value.
+& Re-ran evaluation and confirmed retrieval scores updated correctly for the affected questions; edge cases with missing \texttt{expected\_scene} verified to fall back gracefully. \\
+\midrule
+Claude Code
+& Improve grounding by adding a citation instruction to the system prompt; regenerate results.
+& Proposed adding an explicit ``Always cite the Act and Scene'' instruction to \texttt{prompts/system\_prompt.txt}; re-ran evaluation showing mean RAG grounding rise to 5.0.
+& Spot-checked model outputs to confirm Act/Scene citations appeared consistently; accepted the change and committed updated \texttt{evaluation\_results.csv}. \\
+\midrule
+Claude Code
+& Draft Sections V (Evaluation Design) and VI (Results and Analysis) of the report, including per-type breakdown and qualitative examples.
+& Prose drafts for all subsections, summary table, per-type commentary, failure analysis, and qualitative example blocks.
+& Substantially rewritten to match final scores from \texttt{evaluation\_results.csv}; tables regenerated from live data; qualitative examples replaced with verbatim system outputs. \\
 \bottomrule
 \end{tabularx}
 \end{table*}
